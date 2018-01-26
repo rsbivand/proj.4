@@ -51,12 +51,9 @@
     pj_init code, implementing support for multilevel, embedded pipelines.
 
     Syntactically, the pipeline system introduces the "+step" keyword (which
-    indicates the start of each transformation step), the "+omit_fwd" and
-    "+omit_inv" keywords (which indicate that a given transformation step
-    should be omitted when the pipeline is executed in forward, resp. inverse
-    direction), and reintroduces the +inv keyword (indicating that a given
-    transformation step should run in reverse, i.e. forward, when the pipeline
-    is executed in inverse direction, and vice versa).
+    indicates the start of each transformation step), and reintroduces the +inv
+    keyword (indicating that a given transformation step should run in reverse, i.e.
+    forward, when the pipeline is executed in inverse direction, and vice versa).
 
     Hence, the first transformation example above, can be implemented as:
 
@@ -75,7 +72,7 @@
 Thomas Knudsen, thokn@sdfe.dk, 2016-05-20
 
 ********************************************************************************
-* Copyright (c) 2016, Thomas Knudsen / SDFE
+* Copyright (c) 2016, 2017, 2018 Thomas Knudsen / SDFE
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -99,10 +96,10 @@ Thomas Knudsen, thokn@sdfe.dk, 2016-05-20
 
 #define PJ_LIB__
 #include <geodesic.h>
+#include <proj.h>
 #include "proj_internal.h"
 #include "projects.h"
 
-#include <assert.h>
 #include <stddef.h>
 #include <errno.h>
 PROJ_HEAD(pipeline,         "Transformation pipeline manager");
@@ -111,7 +108,6 @@ PROJ_HEAD(pipeline,         "Transformation pipeline manager");
 struct pj_opaque {
     int reversible;
     int steps;
-    int verbose;
     char **argv;
     char **current_argv;
     PJ **pipeline;
@@ -125,52 +121,6 @@ static XYZ    pipeline_forward_3d (LPZ lpz, PJ *P);
 static LPZ    pipeline_reverse_3d (XYZ xyz, PJ *P);
 static XY     pipeline_forward (LP lpz, PJ *P);
 static LP     pipeline_reverse (XY xyz, PJ *P);
-
-
-
-/********************************************************************
-
-                  ISOMORPHIC TRANSFORMATIONS
-
-*********************************************************************
-
-    In this context, an isomorphic transformation is a proj PJ
-    object returning the same kind of coordinates that it
-    receives, i.e. a transformation from angular to angular or
-    linear to linear coordinates.
-
-    The degrees-to-radians operation is an example of the former,
-    while the latter is typical for most of the datum shift
-    operations used in geodesy, e.g. the Helmert 7-parameter shift.
-
-    Isomorphic transformations trips up the pj_inv/pj_fwd
-    functions, which try to check input sanity and scale output to
-    internal proj units, under the assumption that if input is of
-    angular type, then output must be of linear (or vice versa).
-
-    Hence, to avoid having pj_inv/pj_fwd stomping on output (or
-    choking on input), we need a way to tell them that they should
-    accept whatever is being handed to them.
-
-    The P->left and P->right elements indicate isomorphism.
-
-    For classic proj style projections, P->left has the value
-    PJ_IO_UNITS_RADIANS, while P->right has the value
-    PJ_IO_UNITS_CLASSIC, indicating that the forward driver expects
-    angular input coordinates, and provides linear output coordinates,
-    scaled by the P->a semimajor axis length.
-
-    Newer projections may set P->left and P->right to either
-    PJ_IO_UNITS_METERS, PJ_IO_UNITS_RADIANS or PJ_IO_UNITS_ANY,
-    to indicate their I/O style.
-
-    For the forward driver, left indicates input coordinate
-    type, while right indicates output coordinate type.
-
-    For the inverse driver, left indicates output coordinate
-    type, while right indicates input coordinate type.
-
-*********************************************************************/
 
 
 
@@ -188,7 +138,6 @@ static PJ_COORD pipeline_forward_4d (PJ_COORD point, PJ *P) {
 }
 
 
-
 static PJ_COORD pipeline_reverse_4d (PJ_COORD point, PJ *P) {
     int i, first_step, last_step;
 
@@ -202,35 +151,57 @@ static PJ_COORD pipeline_reverse_4d (PJ_COORD point, PJ *P) {
 }
 
 
-/* Delegate the work to pipeline_forward_4d() */
+
+
 static XYZ pipeline_forward_3d (LPZ lpz, PJ *P) {
     PJ_COORD point = {{0,0,0,0}};
+    int i;
     point.lpz = lpz;
-    point = pipeline_forward_4d (point, P);
+
+    for (i = 1;  i <= P->opaque->steps;  i++)
+        point = pj_approx_3D_trans (P->opaque->pipeline[i], 1, point);
+
     return point.xyz;
 }
 
-/* Delegate the work to pipeline_reverse_4d() */
+
 static LPZ pipeline_reverse_3d (XYZ xyz, PJ *P) {
     PJ_COORD point = {{0,0,0,0}};
+    int i;
     point.xyz = xyz;
-    point = pipeline_reverse_4d (point, P);
+
+    for (i = P->opaque->steps;  i > 0 ;  i--)
+        point = pj_approx_3D_trans (P->opaque->pipeline[i], -1, point);
+
     return point.lpz;
 }
 
+
+
+
 static XY pipeline_forward (LP lp, PJ *P) {
     PJ_COORD point = {{0,0,0,0}};
+    int i;
     point.lp = lp;
-    point = pipeline_forward_4d (point, P);
+
+    for (i = 1;  i <= P->opaque->steps;  i++)
+        point = pj_approx_2D_trans (P->opaque->pipeline[i], 1, point);
+
     return point.xy;
 }
 
+
 static LP pipeline_reverse (XY xy, PJ *P) {
     PJ_COORD point = {{0,0,0,0}};
+    int i;
     point.xy = xy;
-    point = pipeline_reverse_4d (point, P);
+    for (i = P->opaque->steps;  i > 0 ;  i--)
+        point = pj_approx_2D_trans (P->opaque->pipeline[i], -1, point);
+
     return point.lp;
 }
+
+
 
 
 static void *destructor (PJ *P, int errlev) {
@@ -244,8 +215,7 @@ static void *destructor (PJ *P, int errlev) {
     /* Deallocate each pipeine step, then pipeline array */
     if (0!=P->opaque->pipeline)
         for (i = 0;  i < P->opaque->steps; i++)
-            if (0!=P->opaque->pipeline[i+1])
-                P->opaque->pipeline[i+1]->destructor (P->opaque->pipeline[i+1], errlev);
+            proj_destroy (P->opaque->pipeline[i+1]);
     pj_dealloc (P->opaque->pipeline);
 
     pj_dealloc (P->opaque->argv);
@@ -268,6 +238,8 @@ static PJ *pj_create_pipeline (PJ *P, size_t steps) {
 }
 
 
+
+
 /* count the number of args in pipeline definition */
 static size_t argc_params (paralist *params) {
     size_t argc = 0;
@@ -277,7 +249,7 @@ static size_t argc_params (paralist *params) {
 }
 
 /* Sentinel for argument list */
-static char argv_sentinel[] = "step";
+static char *argv_sentinel = "step";
 
 /* turn paralist into argc/argv style argument list */
 static char **argv_params (paralist *params, size_t argc) {
@@ -292,6 +264,9 @@ static char **argv_params (paralist *params, size_t argc) {
     return argv;
 }
 
+
+
+
 /* Being the special operator that the pipeline is, we have to handle the    */
 /* ellipsoid differently than usual. In general, the pipeline operation does */
 /* not need an ellipsoid, but in some cases it is beneficial nonetheless.    */
@@ -305,6 +280,7 @@ static char **argv_params (paralist *params, size_t argc) {
 /* re-initialize P->geod.                                                    */
 static void set_ellipsoid(PJ *P) {
     paralist *cur, *attachment;
+    int err = proj_errno_reset (P);
 
     /* Break the linked list after the global args */
     attachment = 0;
@@ -317,17 +293,27 @@ static void set_ellipsoid(PJ *P) {
 
     /* Check if there's any ellipsoid specification in the global params. */
     /* If not, use WGS84 as default                                       */
-    if (pj_ell_set(P->ctx, P->params, &P->a, &P->es)) {
+    if (0 != pj_ellipsoid (P)) {
         P->a  = 6378137.0;
         P->es = .00669438002290341575;
+
+        /* reset an "unerror": In this special use case, the errno is    */
+        /* not an error signal, but just a reply from pj_ellipsoid,      */
+        /* telling us that "No - there was no ellipsoid definition in    */
+        /* the PJ you provided".                                         */
+        proj_errno_reset (P);
     }
 
-    pj_calc_ellps_params(P, P->a, P->es);
+    pj_calc_ellipsoid_params (P, P->a, P->es);
+
     geod_init(P->geod, P->a,  (1 - sqrt (1 - P->es)));
 
     /* Re-attach the dangling list */
     cur->next = attachment;
+    proj_errno_restore (P, err);
 }
+
+
 
 
 PJ *OPERATION(pipeline,0) {
@@ -335,17 +321,26 @@ PJ *OPERATION(pipeline,0) {
     int i_pipeline = -1, i_first_step = -1, i_current_step;
     char **argv, **current_argv;
 
-    P->fwd4d  = pipeline_forward_4d;
-    P->inv4d  = pipeline_reverse_4d;
+    P->fwd4d  =  pipeline_forward_4d;
+    P->inv4d  =  pipeline_reverse_4d;
     P->fwd3d  =  pipeline_forward_3d;
     P->inv3d  =  pipeline_reverse_3d;
     P->fwd    =  pipeline_forward;
     P->inv    =  pipeline_reverse;
     P->destructor  =  destructor;
+    P->is_pipeline =  1;
+
+    /* Currently, the pipeline driver is a raw bit mover, enabling other operations */
+    /* to collaborate efficiently. All prep/fin stuff is done at the step levels. */
+    P->skip_fwd_prepare  = 1;
+    P->skip_fwd_finalize = 1;
+    P->skip_inv_prepare  = 1;
+    P->skip_inv_finalize = 1;
+
 
     P->opaque = pj_calloc (1, sizeof(struct pj_opaque));
     if (0==P->opaque)
-        return pj_default_destructor(P, ENOMEM);
+        return destructor(P, ENOMEM);
 
     argc = (int)argc_params (P->params);
     P->opaque->argv = argv = argv_params (P->params, argc);
@@ -358,7 +353,7 @@ PJ *OPERATION(pipeline,0) {
 
     /* Do some syntactical sanity checking */
     for (i = 0;  i < argc;  i++) {
-        if (0==strcmp ("step", argv[i])) {
+        if (0==strcmp (argv_sentinel, argv[i])) {
             if (-1==i_pipeline) {
                 proj_log_error (P, "Pipeline: +step before +proj=pipeline");
                 return destructor (P, PJD_ERR_MALFORMED_PIPELINE);
@@ -371,7 +366,7 @@ PJ *OPERATION(pipeline,0) {
 
         if (0==strcmp ("proj=pipeline", argv[i])) {
             if (-1 != i_pipeline) {
-                proj_log_error (P, "Pipeline: Nesting only allowed when child pipelines are wrapped in +init's");
+                proj_log_error (P, "Pipeline: Nesting only allowed when child pipelines are wrapped in '+init's");
                 return destructor (P, PJD_ERR_MALFORMED_PIPELINE); /* ERROR: nested pipelines */
             }
             i_pipeline = i;
@@ -396,6 +391,7 @@ PJ *OPERATION(pipeline,0) {
     for (i_current_step = i_first_step, i = 0;  i < nsteps;  i++) {
         int j;
         int  current_argc = 0;
+        int  err;
         PJ     *next_step = 0;
 
         /* Build a set of setup args for the current step */
@@ -415,22 +411,58 @@ PJ *OPERATION(pipeline,0) {
         for (j = 1;  j < current_argc; j++)
             proj_log_trace (P, "    %s", current_argv[j]);
 
-        next_step = pj_init_ctx (P->ctx, current_argc, current_argv);
+        err = proj_errno_reset (P);
 
+        next_step = proj_create_argv (P->ctx, current_argc, current_argv);
         proj_log_trace (P, "Pipeline: Step %d at %p", i, next_step);
+
         if (0==next_step) {
-            proj_log_error (P, "Pipeline: Bad step definition: %s", current_argv[0]);
-            return destructor (P, PJD_ERR_MALFORMED_PIPELINE); /* ERROR: bad pipeline def */
+            /* The step init failed, but possibly without setting errno. If so, we say "malformed" */
+            int err_to_report = proj_errno(P);
+            if (0==err_to_report)
+                err_to_report = PJD_ERR_MALFORMED_PIPELINE;
+            proj_log_error (P, "Pipeline: Bad step definition: %s (%s)", current_argv[0], pj_strerrno (err_to_report));
+            return destructor (P, err_to_report); /* ERROR: bad pipeline def */
         }
+
+        proj_errno_restore (P, err);
 
         /* Is this step inverted? */
         for (j = 0;  j < current_argc; j++)
-            if (0==strcmp("inv", current_argv[j]))
-                next_step->inverted = 1;
+            if (0==strcmp("inv", current_argv[j])) {
+                /* if +inv exists in both global and local args the forward operation should be used */
+                next_step->inverted = next_step->inverted == 0 ? 1 : 0;
+            }
 
         P->opaque->pipeline[i+1] = next_step;
 
-        proj_log_trace (P, "Pipeline:    step done");
+        proj_log_trace (P, "Pipeline at [%p]:    step at [%p] done", P, next_step);
+    }
+
+    /* Require a forward path through the pipeline */
+    for (i = 1; i <= nsteps; i++) {
+        PJ *Q = P->opaque->pipeline[i];
+        if ( ( Q->inverted && (Q->inv || Q->inv3d || Q->fwd4d) ) ||
+             (!Q->inverted && (Q->fwd || Q->fwd3d || Q->fwd4d) ) ) {
+            continue;
+        } else {
+            proj_log_error (P, "Pipeline: A forward operation couldn't be constructed");
+            return destructor (P, PJD_ERR_MALFORMED_PIPELINE);
+        }
+    }
+
+    /* determine if an inverse operation is possible */
+    for (i = 1; i <= nsteps; i++) {
+        PJ *Q = P->opaque->pipeline[i];
+        if ( ( Q->inverted && (Q->fwd || Q->fwd3d || Q->fwd4d) ) ||
+             ( Q->inv || Q->inv3d || Q->inv4d) ) {
+            continue;
+        } else {
+            P->inv   = 0;
+            P->inv3d = 0;
+            P->inv4d = 0;
+            break;
+        }
     }
 
     proj_log_trace (P, "Pipeline: %d steps built. Determining i/o characteristics", nsteps);
@@ -440,7 +472,5 @@ PJ *OPERATION(pipeline,0) {
 
     /* Now, correspondingly determine forward output (= reverse input) data type */
     P->right = pj_right (P->opaque->pipeline[nsteps]);
-
     return P;
 }
-

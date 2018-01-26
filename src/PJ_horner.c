@@ -78,7 +78,6 @@
 #define PJ_LIB__
 #include "proj_internal.h"
 #include "projects.h"
-#include <assert.h>
 #include <stddef.h>
 #include <math.h>
 #include <errno.h>
@@ -435,7 +434,7 @@ PJ *PROJECTION(horner) {
     P->inv3d  =  0;
     P->fwd    =  0;
     P->inv    =  0;
-    P->left   =  P->right  =  PJ_IO_UNITS_METERS;
+    P->left   =  P->right  =  PJ_IO_UNITS_PROJECTED;
     P->destructor = horner_freeup;
 
     /* Polynomial degree specified? */

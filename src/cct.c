@@ -71,20 +71,23 @@ Thomas Knudsen, thokn@sdfe.dk, 2016-05-25/2017-10-26
 
 ***********************************************************************/
 
-#include "optargpm.h"
-#include "proj_internal.h"
-#include <proj.h>
-#include "projects.h"
+#include <ctype.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <ctype.h>
 #include <string.h>
-#include <math.h>
+
+#include <proj.h>
+#include "proj_internal.h"
+#include "projects.h"
+#include "optargpm.h"
 
 
+/* Prototypes for functions in proj_strtod.c */
 double proj_strtod(const char *str, char **endptr);
 double proj_atof(const char *str);
 
+/* Prototypes from functions in this file */
 char *column (char *buf, int n);
 PJ_COORD parse_input_line (char *buf, int *columns, double fixed_height, double fixed_time);
 
@@ -193,7 +196,7 @@ int main(int argc, char **argv) {
     }
 
     if (opt_given (o, "c")) {
-        int ncols = sscanf (opt_arg (o, "c"), "%d,%d,%d,%d", columns_xyzt, columns_xyzt+1, columns_xyzt+3, columns_xyzt+3);
+        int ncols = sscanf (opt_arg (o, "c"), "%d,%d,%d,%d", columns_xyzt, columns_xyzt+1, columns_xyzt+2, columns_xyzt+3);
         if (ncols != nfields) {
             fprintf (stderr, "%s: Too few input columns given: '%s'\n", o->progname, opt_arg (o, "c"));
             free (o);
@@ -206,16 +209,23 @@ int main(int argc, char **argv) {
     /* Setup transformation */
     P = proj_create_argv (0, o->pargc, o->pargv);
     if ((0==P) || (0==o->pargc)) {
-        fprintf (stderr, "%s: Bad transformation arguments. '%s -h' for help\n", o->progname, o->progname);
+        fprintf (stderr, "%s: Bad transformation arguments - (%s)\n    '%s -h' for help\n",
+                 o->progname, pj_strerrno (proj_errno(P)), o->progname);
         free (o);
         if (stdout != fout)
             fclose (fout);
         return 1;
     }
 
-    /* We have no API call for inverting an operation, so we brute force it. */
-    if (direction==-1)
+    if (direction==-1) {
+        /* fail if an inverse operation is not available */
+        if (!proj_pj_info(P).has_inverse) {
+            fprintf (stderr, "Inverse operation not available\n");
+            return 1;
+        }
+        /* We have no API call for inverting an operation, so we brute force it. */
         P->inverted = !(P->inverted);
+    }
     direction = 1;
 
     /* Allocate input buffer */
@@ -232,6 +242,7 @@ int main(int argc, char **argv) {
 
     /* Loop over all records of all input files */
     while (opt_input_loop (o, optargs_file_format_text)) {
+        int err;
         void *ret = fgets (buf, 10000, o->input);
         opt_eof_handler (o);
         if (0==ret) {
@@ -259,13 +270,17 @@ int main(int argc, char **argv) {
             point.lpzt.lam = proj_torad (point.lpzt.lam);
             point.lpzt.phi = proj_torad (point.lpzt.phi);
         }
+        err = proj_errno_reset (P);
         point = proj_trans (P, direction, point);
 
         if (HUGE_VAL==point.xyzt.x) {
-            /* transformation error (TODO provide existing internal errmsg here) */
-            fprintf (fout, "# Record %d TRANSFORMATION ERROR: %s", (int) o->record_index, buf);
+            /* transformation error */
+            fprintf (fout, "# Record %d TRANSFORMATION ERROR: %s (%s)",
+                            (int) o->record_index, buf, pj_strerrno (proj_errno(P)));
+            proj_errno_restore (P, err);
             continue;
         }
+        proj_errno_restore (P, err);
 
         /* Time to print the result */
         if (proj_angular_output (P, direction)) {

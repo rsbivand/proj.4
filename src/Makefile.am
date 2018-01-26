@@ -46,7 +46,7 @@ libproj_la_SOURCES = \
 	pj_list.h proj_internal.h\
 	PJ_aeqd.c PJ_gnom.c PJ_laea.c PJ_mod_ster.c \
 	PJ_nsper.c PJ_nzmg.c PJ_ortho.c PJ_stere.c PJ_sterea.c \
-	PJ_aea.c PJ_bipc.c PJ_bonne.c PJ_eqdc.c PJ_isea.c \
+	PJ_aea.c PJ_bipc.c PJ_bonne.c PJ_eqdc.c PJ_isea.c PJ_ccon.c\
 	PJ_imw_p.c PJ_krovak.c PJ_lcc.c PJ_poly.c \
 	PJ_rpoly.c PJ_sconics.c proj_rouss.c \
 	PJ_cass.c PJ_cc.c PJ_cea.c PJ_eqc.c PJ_gall.c PJ_geoc.c \
@@ -70,7 +70,7 @@ libproj_la_SOURCES = \
 	aasincos.c adjlon.c bch2bps.c bchgen.c \
 	biveval.c dmstor.c mk_cheby.c pj_auth.c \
 	pj_deriv.c pj_ell_set.c pj_ellps.c pj_errno.c \
-	pj_factors.c pj_fwd.c pj_init.c pj_inv.c pj_fwd3d.c pj_inv3d.c\
+	pj_factors.c pj_fwd.c pj_init.c pj_inv.c \
 	pj_list.c pj_malloc.c pj_mlfn.c pj_msfn.c proj_mdist.c \
 	pj_open_lib.c pj_param.c pj_phi2.c pj_pr_list.c \
 	pj_qsfn.c pj_strerrno.c \

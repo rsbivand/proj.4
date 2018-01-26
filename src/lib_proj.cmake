@@ -54,6 +54,7 @@ SET(SRC_LIBPROJ_PJ
         PJ_cart.c
         PJ_cass.c
         PJ_cc.c
+        PJ_ccon.c
         PJ_cea.c
         PJ_chamb.c
         PJ_collg.c
@@ -184,7 +185,6 @@ SET(SRC_LIBPROJ_CORE
         pj_errno.c
         pj_factors.c
         pj_fwd.c
-        pj_fwd3d.c
         pj_gauss.c
         pj_gc_reader.c
         pj_geocent.c
@@ -195,7 +195,6 @@ SET(SRC_LIBPROJ_CORE
         pj_init.c
         pj_initcache.c
         pj_inv.c
-        pj_inv3d.c
         pj_list.c
         pj_list.h
         pj_log.c

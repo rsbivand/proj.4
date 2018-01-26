@@ -28,7 +28,6 @@
  *****************************************************************************/
 #include <stddef.h>
 #include <errno.h>
-#include <ctype.h>
 #include <proj.h>
 #include "proj_internal.h"
 #include "projects.h"
@@ -81,6 +80,8 @@ double proj_lpz_dist (const PJ *P, LPZ a, LPZ b) {
     PJ_COORD aa, bb;
     aa.lpz = a;
     bb.lpz = b;
+    if (HUGE_VAL==a.lam || HUGE_VAL==b.lam)
+        return HUGE_VAL;
     return hypot (proj_lp_dist (P, aa.lp, bb.lp), a.z - b.z);
 }
 
@@ -131,8 +132,15 @@ double proj_roundtrip (PJ *P, PJ_DIRECTION direction, int n, PJ_COORD *coo) {
 
 
 
-/* Apply the transformation P to the coordinate coo */
+/**************************************************************************************/
 PJ_COORD proj_trans (PJ *P, PJ_DIRECTION direction, PJ_COORD coo) {
+/***************************************************************************************
+Apply the transformation P to the coordinate coo, preferring the 4D interfaces if
+available.
+
+See also pj_approx_2D_trans and pj_approx_3D_trans in pj_internal.c, which work
+similarly, but prefers the 2D resp. 3D interfaces if available.
+***************************************************************************************/
     if (0==P)
         return coo;
     if (P->inverted)
@@ -340,7 +348,7 @@ PJ_COORD proj_geoc_lat (const PJ *P, PJ_DIRECTION direction, PJ_COORD coo) {
     direction = PJ_INV)
 
     The conversion involves a call to the tangent function, which goes through the
-    roof at the poles, so very close (the last few micrometers) to the poles no
+    roof at the poles, so very close (the last centimeter) to the poles no
     conversion takes place and the input latitude is copied directly to the output.
 
     Fortunately, the geocentric latitude converges to the geographical at the
@@ -349,7 +357,7 @@ PJ_COORD proj_geoc_lat (const PJ *P, PJ_DIRECTION direction, PJ_COORD coo) {
     For the spherical case, the geographical latitude equals the geocentric, and
     consequently, the input is copied directly to the output.
 **************************************************************************************/
-    const double limit = M_HALFPI - 1e-12;
+    const double limit = M_HALFPI - 1e-9;
     PJ_COORD res = coo;
     if ((coo.lp.phi > limit) || (coo.lp.phi < -limit) || (P->es==0))
         return res;
@@ -381,67 +389,36 @@ PJ *proj_create (PJ_CONTEXT *ctx, const char *definition) {
     Create a new PJ object in the context ctx, using the given definition. If ctx==0,
     the default context is used, if definition==0, or invalid, a null-pointer is
     returned. The definition may use '+' as argument start indicator, as in
-    "+proj=utm +zone=32", or leave it out, as in "proj=utm zone=32"
+    "+proj=utm +zone=32", or leave it out, as in "proj=utm zone=32".
+
+    It may even use free formatting "proj  =  utm;  zone  =32  ellps= GRS80".
+    Note that the semicolon separator is allowed, but not required.
 **************************************************************************************/
     PJ   *P;
     char *args, **argv;
-    int	  argc, i, j, n;
+    size_t argc, n;
 
     if (0==ctx)
         ctx = pj_get_default_ctx ();
 
-    /* make a copy that we can manipulate */
-    n = (int) strlen (definition);
+    /* Make a copy that we can manipulate */
+    n = strlen (definition);
     args = (char *) malloc (n + 1);
     if (0==args)
         return 0;
     strcpy (args, definition);
 
-    /* all-in-one: count args, eliminate superfluous whitespace, 0-terminate substrings */
-    for (i = j = argc = 0;  i < n;  ) {
-        /* skip prefix whitespace */
-        while (isspace (args[i]))
-            i++;
-
-        /* skip at most one prefix '+' */
-        if ('+'==args[i])
-            i++;
-
-        /* whitespace after a '+' is a syntax error - but by Postel's prescription, we ignore and go on */
-        if (isspace (args[i]))
-            continue;
-
-        /* move a whitespace delimited text string to the left, skipping over superfluous whitespace */
-        while ((0!=args[i]) && (!isspace (args[i])))
-            args[j++] = args[i++];
-
-        /* terminate string - if that makes j pass i (often the case for first arg), let i catch up */
-        args[j++] = 0;
-        if (i < j)
-            i = j;
-
-        /* we finished another arg */
-        argc++;
-
-        /* skip postfix whitespace */
-        while (isspace (args[i]))
-            i++;
+    argc = pj_trim_argc (args);
+    if (argc==0) {
+        pj_dealloc (args);
+        return 0;
     }
 
-    /* turn the massaged input into an array of strings */
-    argv = (char **) calloc (argc, sizeof (char *));
-    if (0==argv)
-        return pj_dealloc (args);
-    argv[0] = args;
-    for (i = 0, j = 1;  i < n;  i++) {
-        if (0==args[i])
-            argv[j++] = args + (i + 1);
-        if (j==argc)
-            break;
-    }
+    argv = pj_trim_argv (argc, args);
 
     /* ...and let pj_init_ctx do the hard work */
-    P = pj_init_ctx (ctx, argc, argv);
+    P = pj_init_ctx (ctx, (int) argc, argv);
+
     pj_dealloc (argv);
     pj_dealloc (args);
     return P;
@@ -458,11 +435,22 @@ a null-pointer is returned. The definition arguments may use '+' as argument sta
 indicator, as in {"+proj=utm", "+zone=32"}, or leave it out, as in {"proj=utm",
 "zone=32"}.
 **************************************************************************************/
+    PJ *P;
+    const char *c;
+
     if (0==argv)
         return 0;
     if (0==ctx)
         ctx = pj_get_default_ctx ();
-    return pj_init_ctx (ctx, argc, argv);
+
+    /* We assume that free format is used, and build a full proj_create compatible string */
+    c = pj_make_args (argc, argv);
+    if (0==c)
+        return 0;
+
+    P = proj_create (ctx, c);
+    pj_dealloc ((char *) c);
+    return P;
 }
 
 
@@ -515,46 +503,42 @@ PJ *proj_destroy (PJ *P) {
     return 0;
 }
 
-int proj_errno (PJ *P) {
-    return pj_ctx_get_errno (pj_get_ctx (P));
+int proj_errno (const PJ *P) {
+    return pj_ctx_get_errno (pj_get_ctx ((PJ *) P));
 }
 
 /*****************************************************************************/
-void proj_errno_set (PJ *P, int err) {
+int proj_errno_set (const PJ *P, int err) {
 /******************************************************************************
-    Sets errno at the context and bubble it up to the thread local errno
+    Set context-errno, bubble it up to the thread local errno, return err
 ******************************************************************************/
     /* Use proj_errno_reset to explicitly clear the error status */
     if (0==err)
-        return;
+        return 0;
 
     /* For P==0 err goes to the default context */
-    proj_context_errno_set (pj_get_ctx (P), err);
+    proj_context_errno_set (pj_get_ctx ((PJ *) P), err);
     errno = err;
-    return;
+    return err;
 }
 
 /*****************************************************************************/
-void proj_errno_restore (PJ *P, int err) {
+int proj_errno_restore (const PJ *P, int err) {
 /******************************************************************************
-    Reduce some mental impedance in the canonical reset/restore use case:
-    Basically, proj_errno_restore() is a synonym for proj_errno_set(),
-    but the use cases are very different (_set: indicate an error to higher
-    level user code, _restore: pass previously set error indicators in case
-    of no errors at this level).
-
-    Hence, although the inner working is identical, we provide both options,
-    to avoid some rather confusing real world code.
+    Use proj_errno_restore when the current function succeeds, but the
+    error flag was set on entry, and stored/reset using proj_errno_reset
+    in order to monitor for new errors.
 
     See usage example under proj_errno_reset ()
 ******************************************************************************/
     if (0==err)
-        return;
+        return 0;
     proj_errno_set (P, err);
+    return 0;
 }
 
 /*****************************************************************************/
-int proj_errno_reset (PJ *P) {
+int proj_errno_reset (const PJ *P) {
 /******************************************************************************
     Clears errno in the context and thread local levels
     through the low level pj_ctx interface.
@@ -562,23 +546,30 @@ int proj_errno_reset (PJ *P) {
     Returns the previous value of the errno, for convenient reset/restore
     operations:
 
-    void foo (PJ *P) {
+    int foo (PJ *P) {
+        // errno may be set on entry, but we need to reset it to be able to
+        // check for errors from "do_something_with_P(P)"
         int last_errno = proj_errno_reset (P);
 
+        // local failure
+        if (0==P)
+            return proj_errno_set (P, 42);
+
+        // call to function that may fail
         do_something_with_P (P);
 
-        // failure - keep latest error status
+        // failure in do_something_with_P? - keep latest error status
         if (proj_errno(P))
-            return;
-        // success - restore previous error status
-        proj_errno_restore (P, last_errno);
-        return;
+            return proj_errno (P);
+
+        // success - restore previous error status, return 0
+        return proj_errno_restore (P, last_errno);
     }
 ******************************************************************************/
     int last_errno;
     last_errno = proj_errno (P);
 
-    pj_ctx_set_errno (pj_get_ctx (P), 0);
+    pj_ctx_set_errno (pj_get_ctx ((PJ *) P), 0);
     errno = 0;
     return last_errno;
 }
@@ -613,7 +604,7 @@ PJ_INFO proj_info(void) {
 
 ******************************************************************************/
     PJ_INFO info;
-    const char **paths;
+    const char * const *paths;
     char *tmpstr;
     int i, n;
     size_t len = 0;
@@ -762,6 +753,8 @@ PJ_GRID_INFO proj_grid_info(const char *gridname) {
     return info;
 }
 
+
+
 /*****************************************************************************/
 PJ_INIT_INFO proj_init_info(const char *initname){
 /******************************************************************************
@@ -771,12 +764,14 @@ PJ_INIT_INFO proj_init_info(const char *initname){
 
     Returns PJ_INIT_INFO struct.
 
-    If the init file is not found all members of
-    the return struct are set to 0. If the init file is found, but it the
-    metadata is missing, the value is set to "Unknown".
+    If the init file is not found all members of the return struct are set
+    to the empty string.
+
+    If the init file is found, but the metadata is missing, the value is
+    set to "Unknown".
 
 ******************************************************************************/
-    int file_found, def_found=0;
+    int file_found;
     char param[80], key[74];
     paralist *start, *next;
     PJ_INIT_INFO info;
@@ -800,7 +795,7 @@ PJ_INIT_INFO proj_init_info(const char *initname){
     strncat(param, key, 73);
 
     start = pj_mkparam(param);
-    next = pj_get_init(ctx, &start, start, key, &def_found);
+    pj_expand_init(ctx, start);
 
     if (pj_param(ctx, start, "tversion").i) {
         pj_strlcpy(info.version, pj_param(ctx, start, "sversion").s, sizeof(info.version));
@@ -823,28 +818,9 @@ PJ_INIT_INFO proj_init_info(const char *initname){
 }
 
 
-/*****************************************************************************/
-PJ_DERIVS proj_derivatives(PJ *P, const LP lp) {
-/******************************************************************************
-    Derivatives of coordinates.
-
-    returns PJ_DERIVS. If unsuccessfull error number is set and the returned
-    struct contains NULL data.
-
-******************************************************************************/
-    PJ_DERIVS derivs;
-
-    if (pj_deriv(lp, 1e-5, P, &derivs)) {
-        /* errno set in pj_derivs */
-        memset(&derivs, 0, sizeof(PJ_DERIVS));
-    }
-
-    return derivs;
-}
-
 
 /*****************************************************************************/
-PJ_FACTORS proj_factors(PJ *P, const LP lp) {
+PJ_FACTORS proj_factors(PJ *P, LP lp) {
 /******************************************************************************
     Cartographic characteristics at point lp.
 
@@ -855,30 +831,26 @@ PJ_FACTORS proj_factors(PJ *P, const LP lp) {
     struct contains NULL data.
 
 ******************************************************************************/
-    PJ_FACTORS factors;
+    PJ_FACTORS factors = {0,0,0, 0,0,0, 0,0};
+    struct FACTORS f;
 
-    if (pj_factors(lp, P, 0.0, &factors)) {
-        /* errno set in pj_factors */
-        memset(&factors, 0, sizeof(PJ_FACTORS));
-    }
+    if (0==P)
+        return factors;
+
+    if (pj_factors(lp, P, 0.0, &f))
+        return factors;
+
+    factors.meridional_scale  =  f.h;
+    factors.parallel_scale    =  f.k;
+    factors.areal_scale       =  f.s;
+
+    factors.angular_distortion        =  f.omega;
+    factors.meridian_parallel_angle   =  f.thetap;
+    factors.meridian_convergence      =  f.conv;
+
+    factors.tissot_semimajor  =  f.a;
+    factors.tissot_semiminor  =  f.b;
 
     return factors;
-}
-
-
-const PJ_ELLPS *proj_list_ellps(void) {
-    return pj_get_ellps_ref();
-}
-
-const PJ_UNITS *proj_list_units(void) {
-    return pj_get_units_ref();
-}
-
-const PJ_OPERATIONS *proj_list_operations(void) {
-    return pj_get_list_ref();
-}
-
-const PJ_PRIME_MERIDIANS *proj_list_prime_meridians(void) {
-    return pj_get_prime_meridians_ref();
 }
 

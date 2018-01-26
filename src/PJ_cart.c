@@ -43,7 +43,6 @@
 #define PJ_LIB__
 #include "proj_internal.h"
 #include "projects.h"
-#include <assert.h>
 #include <stddef.h>
 #include <math.h>
 #include <errno.h>
@@ -187,7 +186,7 @@ static LPZ geodetic (XYZ cartesian,  PJ *P) {
 
 /* In effect, 2 cartesian coordinates of a point on the ellipsoid. Rather pointless, but... */
 static XY cart_forward (LP lp, PJ *P) {
-    PJ_TRIPLET point;
+    PJ_COORD point;
     point.lp = lp;
     point.lpz.z = 0;
 
@@ -197,7 +196,7 @@ static XY cart_forward (LP lp, PJ *P) {
 
 /* And the other way round. Still rather pointless, but... */
 static LP cart_reverse (XY xy, PJ *P) {
-    PJ_TRIPLET point;
+    PJ_COORD point;
     point.xy = xy;
     point.xyz.z = 0;
 
@@ -215,7 +214,6 @@ PJ *CONVERSION(cart,1) {
     P->fwd    =  cart_forward;
     P->inv    =  cart_reverse;
     P->left   =  PJ_IO_UNITS_RADIANS;
-    P->right  =  PJ_IO_UNITS_METERS;
+    P->right  =  PJ_IO_UNITS_CARTESIAN;
     return P;
 }
-

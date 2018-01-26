@@ -43,6 +43,7 @@
 #endif
 
 /* standard inclusions */
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -76,6 +77,14 @@ extern "C" {
 
 #ifndef ABS
 #  define ABS(x)        ((x<0) ? (-1*(x)) : x)
+#endif
+
+#if INT_MAX == 2147483647
+typedef int pj_int32;
+#elif LONG_MAX == 2147483647
+typedef long pj_int32;
+#else
+#warning It seems no 32-bit integer type is available
 #endif
 
 /* maximum path/filename */
@@ -178,15 +187,16 @@ union  PJ_COORD;
 struct geod_geodesic;
 struct pj_opaque;
 struct ARG_list;
-struct FACTORS;
 struct PJ_REGION_S;
 typedef struct PJ_REGION_S  PJ_Region;
 typedef struct ARG_list paralist;   /* parameter list */
 #ifndef PROJ_INTERNAL_H
 enum pj_io_units {
-    PJ_IO_UNITS_CLASSIC = 0,   /* Scaled meters (right) */
-    PJ_IO_UNITS_METERS  = 1,   /* Meters  */
-    PJ_IO_UNITS_RADIANS = 2    /* Radians */
+    PJ_IO_UNITS_WHATEVER  = 0,  /* Doesn't matter (or depends on pipeline neighbours) */
+    PJ_IO_UNITS_CLASSIC   = 1,  /* Scaled meters (right), projected system */
+    PJ_IO_UNITS_PROJECTED = 2,  /* Meters, projected system */
+    PJ_IO_UNITS_CARTESIAN = 3,  /* Meters, 3D cartesian system */
+    PJ_IO_UNITS_RADIANS   = 4   /* Radians */
 };
 #endif
 #ifndef PROJ_H
@@ -229,6 +239,11 @@ struct PJconsts {
     projCtx_t *ctx;
     const char *descr;             /* From pj_list.h or individual PJ_*.c file */
     paralist *params;              /* Parameter list */
+    char *def_size;                /* Shape and size parameters extracted from params */
+    char *def_shape;
+    char *def_spherification;
+    char *def_ellps;
+
     struct geod_geodesic *geod;    /* For geodesic computations */
     struct pj_opaque *opaque;      /* Projection specific parameters, Defined in PJ_*.c */
     int inverted;                  /* Tell high level API functions to swap inv/fwd */
@@ -324,7 +339,12 @@ struct PJconsts {
     int  geoc;                      /* Geocentric latitude flag */
     int  is_latlong;                /* proj=latlong ... not really a projection at all */
     int  is_geocent;                /* proj=geocent ... not really a projection at all */
+    int  is_pipeline;               /* 1 if PJ represents a pipeline */
     int  need_ellps;                /* 0 for operations that are purely cartesian */
+    int  skip_fwd_prepare;
+    int  skip_fwd_finalize;
+    int  skip_inv_prepare;
+    int  skip_inv_finalize;
 
     enum pj_io_units left;          /* Flags for input/output coordinate types */
     enum pj_io_units right;
@@ -336,7 +356,7 @@ struct PJconsts {
 
     **************************************************************************************/
 
-    double  lam0, phi0;                /* central longitude, latitude */
+    double  lam0, phi0;                /* central meridian, parallel */
     double  x0, y0, z0, t0;            /* false easting and northing (and height and time) */
 
 
@@ -413,11 +433,6 @@ struct ARG_list {
 typedef union { double  f; int  i; char *s; } PROJVALUE;
 
 
-struct PJ_SELFTEST_LIST {
-    char    *id;                 /* projection keyword */
-    int     (* testfunc)(void);  /* projection entry point */
-};
-
 struct PJ_ELLPS {
     char    *id;           /* ellipse keyword name */
     char    *major;        /* a= value */
@@ -479,14 +494,14 @@ enum deprecated_constants_for_now_dropped_analytical_factors {
 /* library errors */
 #define PJD_ERR_NO_ARGS                  -1
 #define PJD_ERR_NO_OPTION_IN_INIT_FILE   -2
-#define PJD_ERR_NO_COLOR_IN_INIT_STRING  -3
+#define PJD_ERR_NO_COLON_IN_INIT_STRING  -3
 #define PJD_ERR_PROJ_NOT_NAMED           -4
 #define PJD_ERR_UNKNOWN_PROJECTION_ID    -5
 #define PJD_ERR_ECCENTRICITY_IS_ONE      -6
 #define PJD_ERR_UNKNOW_UNIT_ID           -7
 #define PJD_ERR_INVALID_BOOLEAN_PARAM    -8
 #define PJD_ERR_UNKNOWN_ELLP_PARAM       -9
-#define PJD_ERR_REC_FLATTENING_IS_ZERO  -10
+#define PJD_ERR_REV_FLATTENING_IS_ZERO  -10
 #define PJD_ERR_REF_RAD_LARGER_THAN_90  -11
 #define PJD_ERR_ES_LESS_THAN_ZERO       -12
 #define PJD_ERR_MAJOR_AXIS_NOT_GIVEN    -13
@@ -534,6 +549,7 @@ enum deprecated_constants_for_now_dropped_analytical_factors {
 #define PJD_ERR_LAT_0_IS_ZERO           -55
 #define PJD_ERR_ELLIPSOIDAL_UNSUPPORTED -56
 #define PJD_ERR_TOO_MANY_INITS          -57
+#define PJD_ERR_INVALID_ARG             -58
 
 struct projFileAPI_t;
 
@@ -581,7 +597,7 @@ extern struct PJ_PRIME_MERIDIANS pj_prime_meridians[];
 
 
 #ifdef PJ_LIB__
-#define PROJ_HEAD(id, name) static const char des_##id [] = name
+#define PROJ_HEAD(name, desc) static const char des_##name [] = desc
 
 #define OPERATION(name, NEED_ELLPS)                          \
                                                              \
@@ -618,7 +634,7 @@ PJ *pj_projection_specific_setup_##name (PJ *P)
 
 #define MAX_TAB_ID 80
 typedef struct { float lam, phi; } FLP;
-typedef struct { int lam, phi; } ILP;
+typedef struct { pj_int32 lam, phi; } ILP;
 
 struct CTABLE {
     char id[MAX_TAB_ID];    /* ascii info */
@@ -674,8 +690,12 @@ double adjlon(double);
 double aacos(projCtx,double), aasin(projCtx,double), asqrt(double), aatan2(double, double);
 
 PROJVALUE pj_param(projCtx ctx, paralist *, const char *);
+paralist *pj_param_exists (paralist *list, const char *parameter);
 paralist *pj_mkparam(char *);
+paralist *pj_mkparam_ws (char *str);
 
+
+int pj_ellipsoid (PJ *);
 int pj_ell_set(projCtx ctx, paralist *, double *, double *);
 int pj_datum_set(projCtx,paralist *, PJ *);
 int pj_prime_meridian_set(paralist *, PJ *);
@@ -684,7 +704,8 @@ int pj_angular_units_set(paralist *, PJ *);
 paralist *pj_clone_paralist( const paralist* );
 paralist *pj_search_initcache( const char *filekey );
 void      pj_insert_initcache( const char *filekey, const paralist *list);
-paralist *pj_get_init(projCtx ctx, paralist **start, paralist *next, char *name, int *found_def);
+paralist *pj_expand_init(projCtx ctx, paralist *init);
+
 void     *pj_dealloc_params (projCtx ctx, paralist *start, int errlev);
 
 
@@ -699,11 +720,11 @@ double  pj_qsfn_(double, PJ *);
 double *pj_authset(double);
 double  pj_authlat(double, double *);
 
-COMPLEX pj_zpoly1(COMPLEX, COMPLEX *, int);
-COMPLEX pj_zpolyd1(COMPLEX, COMPLEX *, int, COMPLEX *);
+COMPLEX pj_zpoly1(COMPLEX, const COMPLEX *, int);
+COMPLEX pj_zpolyd1(COMPLEX, const COMPLEX *, int, COMPLEX *);
 
-int pj_deriv(LP, double, PJ *, struct DERIVS *);
-int pj_factors(LP, PJ *, double, struct FACTORS *);
+int pj_deriv(LP, double, const PJ *, struct DERIVS *);
+int pj_factors(LP, const PJ *, double, struct FACTORS *);
 
 struct PW_COEF {    /* row coefficient structure */
     int m;          /* number of c coefficients (=0 for none) */
