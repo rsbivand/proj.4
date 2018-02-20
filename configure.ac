@@ -43,6 +43,8 @@ AC_LINK_IFELSE([AC_LANG_PROGRAM(
         [AC_MSG_RESULT([no]);C99_MATH="-DHAVE_C99_MATH=0"])
 CFLAGS="$save_CFLAGS $C99_MATH"
 
+AC_SEARCH_LIBS([sqrt], [m])
+
 AC_CHECK_FUNC(localeconv, [AC_DEFINE(HAVE_LOCALECONV,1,[Define to 1 if you have localeconv])])
 
 dnl ---------------------------------------------------------------------------
@@ -131,6 +133,7 @@ AC_SUBST(MUTEX_SETTING,$MUTEX_SETTING)
 AC_SUBST(THREAD_LIB,$THREAD_LIB)
 
 AC_CONFIG_FILES([Makefile cmake/Makefile src/Makefile
+                 test/Makefile test/gie/Makefile test/gigs/Makefile
                  man/Makefile man/man1/Makefile man/man3/Makefile nad/Makefile
                  jniwrap/Makefile jniwrap/org/Makefile jniwrap/org/proj4/Makefile])
 AC_CONFIG_FILES([nad/install], [chmod +x nad/install])

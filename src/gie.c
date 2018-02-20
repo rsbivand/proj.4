@@ -133,8 +133,6 @@ typedef struct ffio {
     size_t level;
 }  ffio;
 
-FILE *test = 0;
-
 static int get_inp (ffio *F);
 static int skip_to_next_tag (ffio *F);
 static int step_into_gie_block (ffio *F);
@@ -148,7 +146,7 @@ static ffio *ffio_create (const char **tags, size_t n_tags, size_t max_record_si
 
 static const char *gie_tags[] = {
     "<gie>", "operation", "accept", "expect", "roundtrip", "banner", "verbose",
-    "direction", "tolerance", "builtins", "echo", "</gie>"
+    "direction", "tolerance", "ignore", "builtins", "echo", "</gie>"
 };
 
 static const size_t n_gie_tags = sizeof gie_tags / sizeof gie_tags[0];
@@ -180,12 +178,13 @@ typedef struct {
     PJ_DIRECTION dir;
     int verbosity;
     int op_id;
-    int op_ok,    op_ko;
-    int total_ok, total_ko;
-    int grand_ok, grand_ko;
+    int op_ok,    op_ko,    op_skip;
+    int total_ok, total_ko, total_skip;
+    int grand_ok, grand_ko, grand_skip;
     size_t operation_lineno;
     size_t dimensions_given, dimensions_given_at_last_accept;
     double tolerance;
+    int ignore;
     const char *curr_file;
     FILE *fout;
 } gie_ctx;
@@ -231,7 +230,7 @@ static const char usage[] = {
 
 int main (int argc, char **argv) {
     int  i;
-    const char *longflags[]  = {"v=verbose", "q=quiet", "h=help", "l=list", 0};
+    const char *longflags[]  = {"v=verbose", "q=quiet", "h=help", "l=list", "version", 0};
     const char *longkeys[]   = {"o=output", 0};
     OPTARGS *o;
 
@@ -239,8 +238,8 @@ int main (int argc, char **argv) {
     T.dir = PJ_FWD;
     T.verbosity = 1;
     T.tolerance = 5e-4;
+    T.ignore = 5555; /* Error code that will not be issued by proj_create() */
 
-    test = fopen ("test.c", "wt");
     o = opt_parse (argc, argv, "hlvq", "o", longflags, longkeys);
     if (0==o)
         return 0;
@@ -249,6 +248,13 @@ int main (int argc, char **argv) {
         printf (usage, o->progname);
         return 0;
     }
+
+
+    if (opt_given (o, "version")) {
+        fprintf (stdout, "%s: %s\n", o->progname, pj_get_release ());
+        return 0;
+    }
+
 
     if (opt_given (o, "l"))
         return list_err_codes ();
@@ -290,7 +296,8 @@ int main (int argc, char **argv) {
 
     if (T.verbosity > 0) {
         if (o->fargc > 1)
-        fprintf (T.fout, "%sGrand total: %d. Success: %d, Failure: %d\n", delim, T.grand_ok+T.grand_ko, T.grand_ok, T.grand_ko);
+        fprintf (T.fout, "%sGrand total: %d. Success: %d, Skipped: %d, Failure: %d\n",
+                 delim, T.grand_ok+T.grand_ko+T.grand_skip, T.grand_ok, T.grand_skip, T.grand_ko);
         fprintf (T.fout, "%s", delim);
     }
     else
@@ -311,6 +318,12 @@ static int another_failure (void) {
     return 0;
 }
 
+static int another_skip (void) {
+    T.op_skip++;
+    T.total_skip++;
+    return 0;
+}
+
 static int another_success (void) {
     T.op_ok++;
     T.total_ok++;
@@ -324,6 +337,7 @@ static int process_file (const char *fname) {
     F->lineno = F->next_lineno = F->level = 0;
     T.op_ok = T.total_ok = 0;
     T.op_ko = T.total_ko = 0;
+    T.op_skip = T.total_skip = 0;
 
     f = fopen (fname, "rt");
     if (0==f) {
@@ -347,10 +361,12 @@ static int process_file (const char *fname) {
     fclose (f);
     F->lineno = F->next_lineno = 0;
 
-    T.grand_ok += T.total_ok;
-    T.grand_ko += T.total_ko;
+    T.grand_ok   += T.total_ok;
+    T.grand_ko   += T.total_ko;
+    T.grand_skip += T.grand_skip;
     if (T.verbosity > 0)
-    fprintf (T.fout, "%stotal: %2d tests succeeded,  %2d tests %s\n", delim, T.total_ok, T.total_ko, T.total_ko? "FAILED!": "failed.");
+    fprintf (T.fout, "%stotal: %2d tests succeeded, %2d tests skipped, %2d tests %s\n",
+             delim, T.total_ok, T.total_skip, T.total_ko, T.total_ko? "FAILED!": "failed.");
 
     if (F->level==0)
         return errmsg (-3, "File '%s':Missing '<gie>' cmnd - bye!\n", fname);
@@ -437,6 +453,10 @@ static int tolerance (const char *args) {
     return 0;
 }
 
+static int ignore (const char *args) {
+    T.ignore = errno_from_err_const (column (args, 1));
+    return 0;
+}
 
 static int direction (const char *args) {
     const char *endp = args;
@@ -463,7 +483,8 @@ static int direction (const char *args) {
 
 static void finish_previous_operation (const char *args) {
     if (T.verbosity > 1 && T.op_id > 1 && T.op_ok+T.op_ko)
-        fprintf (T.fout, "%s     %d tests succeeded,  %d tests %s\n", delim, T.op_ok, T.op_ko, T.op_ko? "FAILED!": "failed.");
+        fprintf (T.fout, "%s     %d tests succeeded,  %d tests skipped, %d tests %s\n",
+                 delim, T.op_ok, T.op_skip, T.op_ko, T.op_ko? "FAILED!": "failed.");
     (void) args;
 }
 
@@ -490,9 +511,11 @@ either a conversion or a transformation)
 
     T.op_ok = 0;
     T.op_ko = 0;
+    T.op_skip = 0;
 
     direction ("forward");
     tolerance ("0.5 mm");
+    ignore ("pjd_err_dont_skip");
 
     proj_errno_reset (T.P);
 
@@ -529,6 +552,7 @@ using the "builtins" command verb.
     }
     T.op_ok = 0;
     T.op_ko = 0;
+    T.op_skip = 0;
     i = pj_unitconvert_selftest ();
     if (i!=0) {
         fprintf (T.fout, "pj_unitconvert_selftest fails with %d\n", i);
@@ -633,8 +657,12 @@ back/forward transformation pairs.
     char *endp;
     PJ_COORD coo;
 
-    if (0==T.P)
+    if (0==T.P) {
+        if (T.ignore == proj_errno(T.P))
+            return another_skip();
+
         return another_failure ();
+    }
 
     ans = proj_strtod (args, &endp);
     ntrips = (int) (endp==args? 100: fabs(ans));
@@ -653,7 +681,7 @@ back/forward transformation pairs.
             banner (T.operation);
         fprintf (T.fout, "%s", T.op_ko? "     -----\n": delim);
         fprintf (T.fout, "     FAILURE in %s(%d):\n", opt_strip_path (T.curr_file), (int) F->lineno);
-        fprintf (T.fout, "     roundtrip deviation: %.3f mm, expected: %.3f mm\n", 1000*r, 1000*d);
+        fprintf (T.fout, "     roundtrip deviation: %.6f mm, expected: %.6f mm\n", 1000*r, 1000*d);
     }
     return another_failure ();
 }
@@ -672,13 +700,13 @@ static int expect_message (double d, const char *args) {
 
     fprintf (T.fout, "     FAILURE in %s(%d):\n", opt_strip_path (T.curr_file), (int) F->lineno);
     fprintf (T.fout, "     expected: %s\n", args);
-    fprintf (T.fout, "     got:      %.9f   %.9f", T.b.xy.x,  T.b.xy.y);
+    fprintf (T.fout, "     got:      %.12f   %.12f", T.b.xy.x,  T.b.xy.y);
     if (T.b.xyzt.t!=0 || T.b.xyzt.z!=0)
         fprintf (T.fout, "   %.9f", T.b.xyz.z);
     if (T.b.xyzt.t!=0)
         fprintf (T.fout, "   %.9f", T.b.xyzt.t);
     fprintf (T.fout, "\n");
-    fprintf (T.fout, "     deviation:  %.3f mm,  expected:  %.3f mm\n", 1000*d, 1000*T.tolerance);
+    fprintf (T.fout, "     deviation:  %.6f mm,  expected:  %.6f mm\n", 1000*d, 1000*T.tolerance);
     return 1;
 }
 
@@ -741,12 +769,16 @@ Tell GIE what to expect, when transforming the ACCEPTed input
             expect_failure_with_errno = errno_from_err_const (column (args, 3));
     }
 
+    if (T.ignore==proj_errno(T.P))
+        return another_skip ();
+
     if (0==T.P) {
         /* If we expect failure, and fail, then it's a success... */
         if (expect_failure) {
             /* Failed to fail correctly? */
             if (expect_failure_with_errno && proj_errno (T.P)!=expect_failure_with_errno)
                 return expect_failure_with_errno_message (expect_failure_with_errno, proj_errno(T.P));
+
             return another_success ();
         }
 
@@ -797,42 +829,35 @@ Tell GIE what to expect, when transforming the ACCEPTed input
     /* expected angular values, probably in degrees */
     ce = proj_angular_output (T.P, T.dir)? torad_coord (T.P, T.dir, T.e): T.e;
     if (T.verbosity > 3)
-        printf ("EXPECTS  %.4f  %.4f  %.4f  %.4f\n", ce.v[0],ce.v[1],ce.v[2],ce.v[3]);
+        printf ("EXPECTS  %.12f  %.12f  %.12f  %.12f\n", ce.v[0],ce.v[1],ce.v[2],ce.v[3]);
 
     /* input ("accepted") values, also probably in degrees */
     ci = proj_angular_input (T.P, T.dir)? torad_coord (T.P, T.dir, T.a): T.a;
     if (T.verbosity > 3)
-        printf ("ACCEPTS  %.4f  %.4f  %.4f  %.4f\n", ci.v[0],ci.v[1],ci.v[2],ci.v[3]);
+        printf ("ACCEPTS  %.12f  %.12f  %.12f  %.12f\n", ci.v[0],ci.v[1],ci.v[2],ci.v[3]);
 
     /* angular output from proj_trans comes in radians */
     co = expect_trans_n_dim (ci);
     T.b = proj_angular_output (T.P, T.dir)? todeg_coord (T.P, T.dir, co): co;
     if (T.verbosity > 3)
-        printf ("GOT      %.4f  %.4f  %.4f  %.4f\n", co.v[0],co.v[1],co.v[2],co.v[3]);
+        printf ("GOT      %.12f  %.12f  %.12f  %.12f\n", co.v[0],co.v[1],co.v[2],co.v[3]);
 
-    /* but there are a few more possible input conventions... */
-    if (proj_angular_output (T.P, T.dir)) {
-        double e = HUGE_VAL;
-        d = proj_lpz_dist (T.P, ce.lpz, co.lpz);
-        /* check whether input was already in radians */
-        if (d > T.tolerance)
-            e = proj_lpz_dist (T.P, T.e.lpz, co.lpz);
-        if (e < d)
-            d = e;
-
-        /* or the tolerance may be based on euclidean distance */
-        if (d > T.tolerance)
-            e = proj_xyz_dist (T.b.xyz, T.e.xyz);
-        if (e < d)
-            d = e;
+#if 0
+    /* We need to handle unusual axis orders - that'll be an item for version 5.1 */
+    if (T.P->axisswap) {
+        ce = proj_trans (T.P->axisswap, T.dir, ce);
+        co = proj_trans (T.P->axisswap, T.dir, co);
     }
+#endif
+    if (proj_angular_output (T.P, T.dir))
+        d = proj_lpz_dist (T.P, ce, co);
     else
-        d = proj_xyz_dist (T.b.xyz, T.e.xyz);
+        d = proj_xyz_dist (co, ce);
+
     if (d > T.tolerance)
         return expect_message (d, args);
 
     another_success ();
-
     return 0;
 }
 
@@ -877,6 +902,7 @@ static int dispatch (const char *cmnd, const char *args) {
     if  (0==strcmp (cmnd, "verbose"))   return  verbose   (args);
     if  (0==strcmp (cmnd, "direction")) return  direction (args);
     if  (0==strcmp (cmnd, "tolerance")) return  tolerance (args);
+    if  (0==strcmp (cmnd, "ignore"))    return  ignore (args);
     if  (0==strcmp (cmnd, "builtins"))  return  builtins  (args);
     if  (0==strcmp (cmnd, "echo"))      return  echo      (args);
 
@@ -946,6 +972,7 @@ static const struct errno_vs_err_const lookup[] = {
     {"pjd_err_ellipsoidal_unsupported"  ,  -56},
     {"pjd_err_too_many_inits"           ,  -57},
     {"pjd_err_invalid_arg"              ,  -58},
+    {"pjd_err_dont_skip"                ,  5555},
     {"pjd_err_unknown"                  ,  9999},
     {"pjd_err_enomem"                   ,  ENOMEM},
 };
@@ -1405,13 +1432,13 @@ static int pj_horner_selftest (void) {
 
     /* Forward projection */
     b = proj_trans (P, PJ_FWD, a);
-    dist = proj_xy_dist (b.xy, c.xy);
+    dist = proj_xy_dist (b, c);
     if (dist > 0.001)
         return 2;
 
     /* Inverse projection */
     b = proj_trans (P, PJ_INV, c);
-    dist = proj_xy_dist (b.xy, a.xy);
+    dist = proj_xy_dist (b, a);
     if (dist > 0.001)
         return 3;
 
@@ -1458,7 +1485,7 @@ static int pj_cart_selftest (void) {
     size_t n, sz;
     double dist, h, t;
     char *args[3] = {"proj=utm", "zone=32", "ellps=GRS80"};
-    const char *arg = {"+proj=utm +zone=32 +ellps=GRS80"};
+    char arg[50] = {"+proj=utm; +zone=32; +ellps=GRS80"};
     char buf[40];
 
     /* An utm projection on the GRS80 ellipsoid */
@@ -1493,7 +1520,7 @@ static int pj_cart_selftest (void) {
     /* Forward again, to get two linear items for comparison */
     a = proj_trans (P, PJ_FWD, a);
 
-    dist = proj_xy_dist (a.xy, b.xy);
+    dist = proj_xy_dist (a, b);
     if (dist > 2e-9)
         return 3;
 
@@ -1689,7 +1716,8 @@ static int pj_cart_selftest (void) {
         if (strcmp(info.version, tmpstr)) return 55;
     }
     if (info.release[0] == '\0')    return 56;
-    if (info.searchpath[0] == '\0') return 57;
+    if (getenv ("HOME") || getenv ("PROJ_LIB"))
+        if (info.searchpath[0] == '\0') return 57;
 
     /* proj_pj_info() */
     P = proj_create(PJ_DEFAULT_CTX, "+proj=august"); /* august has no inverse */
@@ -1699,15 +1727,16 @@ static int pj_cart_selftest (void) {
     P = proj_create(PJ_DEFAULT_CTX, arg);
     pj_info = proj_pj_info(P);
     if ( !pj_info.has_inverse )            {  proj_destroy(P); return 61; }
+    pj_shrink (arg);
     if ( strcmp(pj_info.definition, arg) ) {  proj_destroy(P); return 62; }
     if ( strcmp(pj_info.id, "utm") )       {  proj_destroy(P); return 63; }
 
     proj_destroy(P);
 
     /* proj_grid_info() */
-    grid_info = proj_grid_info("egm96_15.gtx");
+    grid_info = proj_grid_info("null");
     if ( strlen(grid_info.filename) == 0 )            return 64;
-    if ( strcmp(grid_info.gridname, "egm96_15.gtx") ) return 65;
+    if ( strcmp(grid_info.gridname, "null") ) return 65;
     grid_info = proj_grid_info("nonexistinggrid");
     if ( strlen(grid_info.filename) > 0 )             return 66;
 
@@ -1742,7 +1771,7 @@ static int pj_cart_selftest (void) {
     a.lp.lam = PJ_TORAD(12);
     a.lp.phi = PJ_TORAD(55);
 
-    factors = proj_factors(P, a.lp);
+    factors = proj_factors(P, a);
     if (proj_errno(P))
         return 85; /* factors not created correctly */
 
@@ -1807,12 +1836,12 @@ static int pj_cart_selftest (void) {
 
     /* linear in and out */
     P = proj_create(PJ_DEFAULT_CTX,
-        " +proj=helmert +ellps=GRS80"
+        " +proj=helmert"
         " +x=0.0127 +y=0.0065 +z=-0.0209 +s=0.00195"
         " +rx=-0.00039 +ry=0.00080 +rz=-0.00114"
         " +dx=-0.0029 +dy=-0.0002 +dz=-0.0006 +ds=0.00001"
         " +drx=-0.00011 +dry=-0.00019 +drz=0.00007"
-        " +t_epoch=1988.0 +transpose"
+        " +t_epoch=1988.0 +transpose +no_defs"
     );
     if (0==P) return 0;
     if (proj_angular_input (P, PJ_FWD))  return 116;
@@ -1824,14 +1853,15 @@ static int pj_cart_selftest (void) {
     if (proj_angular_input (P, PJ_INV))  return 121;
     if (proj_angular_output (P, PJ_FWD)) return 122;
     if (proj_angular_output (P, PJ_INV)) return 123;
-    proj_destroy(P);
 
+    /* We specified "no_defs" but didn't give any ellipsoid info */
+    /* pj_init_ctx should defualt to WGS84 */
+    if (P->a != 6378137.0) return 124;
+    if (P->f != 1.0/298.257223563) return 125;
+    proj_destroy(P);
 
     return 0;
 }
-
-
-
 
 
 

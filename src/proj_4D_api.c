@@ -67,32 +67,47 @@ int proj_angular_output (PJ *P, enum PJ_DIRECTION dir) {
 }
 
 
+/* Geodesic distance (in meter) + fwd and rev azimuth between two points on the ellipsoid */
+PJ_COORD proj_geod (const PJ *P, PJ_COORD a, PJ_COORD b) {
+    PJ_COORD c;
+    /* Note: the geodesic code takes arguments in degrees */
+    geod_inverse (P->geod,
+        PJ_TODEG(a.lpz.phi), PJ_TODEG(a.lpz.lam),
+        PJ_TODEG(b.lpz.phi), PJ_TODEG(b.lpz.lam),
+        c.v, c.v+1, c.v+2
+    );
+
+    return c;
+}
+
+
 /* Geodesic distance (in meter) between two points with angular 2D coordinates */
-double proj_lp_dist (const PJ *P, LP a, LP b) {
+double proj_lp_dist (const PJ *P, PJ_COORD a, PJ_COORD b) {
     double s12, azi1, azi2;
     /* Note: the geodesic code takes arguments in degrees */
-    geod_inverse (P->geod, PJ_TODEG(a.phi), PJ_TODEG(a.lam), PJ_TODEG(b.phi), PJ_TODEG(b.lam), &s12, &azi1, &azi2);
+    geod_inverse (P->geod,
+        PJ_TODEG(a.lpz.phi), PJ_TODEG(a.lpz.lam),
+        PJ_TODEG(b.lpz.phi), PJ_TODEG(b.lpz.lam),
+        &s12, &azi1, &azi2
+    );
     return s12;
 }
 
 /* The geodesic distance AND the vertical offset */
-double proj_lpz_dist (const PJ *P, LPZ a, LPZ b) {
-    PJ_COORD aa, bb;
-    aa.lpz = a;
-    bb.lpz = b;
-    if (HUGE_VAL==a.lam || HUGE_VAL==b.lam)
+double proj_lpz_dist (const PJ *P, PJ_COORD a, PJ_COORD b) {
+    if (HUGE_VAL==a.lpz.lam || HUGE_VAL==b.lpz.lam)
         return HUGE_VAL;
-    return hypot (proj_lp_dist (P, aa.lp, bb.lp), a.z - b.z);
+    return hypot (proj_lp_dist (P, a, b), a.lpz.z - b.lpz.z);
 }
 
 /* Euclidean distance between two points with linear 2D coordinates */
-double proj_xy_dist (XY a, XY b) {
-    return hypot (a.x - b.x, a.y - b.y);
+double proj_xy_dist (PJ_COORD a, PJ_COORD b) {
+    return hypot (a.xy.x - b.xy.x, a.xy.y - b.xy.y);
 }
 
 /* Euclidean distance between two points with linear 3D coordinates */
-double proj_xyz_dist (XYZ a, XYZ b) {
-    return hypot (hypot (a.x - b.x, a.y - b.y), a.z - b.z);
+double proj_xyz_dist (PJ_COORD a, PJ_COORD b) {
+    return hypot (proj_xy_dist (a, b), a.xyz.z - b.xyz.z);
 }
 
 
@@ -125,9 +140,9 @@ double proj_roundtrip (PJ *P, PJ_DIRECTION direction, int n, PJ_COORD *coo) {
 
     /* checking for angular *input* since we do a roundtrip, and end where we begin */
     if (proj_angular_input (P, direction))
-        return proj_lpz_dist (P, org.lpz, t.lpz);
+        return proj_lpz_dist (P, org, t);
 
-    return proj_xyz_dist (org.xyz, t.xyz);
+    return proj_xyz_dist (org, t);
 }
 
 
@@ -399,10 +414,11 @@ static int pj_cs2cs_emulation_setup (PJ *P) {
 If any cs2cs style modifiers are given (axis=..., towgs84=..., ) create the 4D API
 equivalent operations, so the preparation and finalization steps in the pj_inv/pj_fwd
 invocators can emulate the behaviour of pj_transform and the cs2cs app.
+
+Returns 1 on success, 0 on failure
 **************************************************************************************/
     PJ *Q;
     paralist *p;
-    char def[1000];
     if (0==P)
         return 0;
 
@@ -415,8 +431,12 @@ invocators can emulate the behaviour of pj_transform and the cs2cs app.
 
     /* Don't axisswap if data are already in "enu" order */
     if (p && (0!=strcmp ("enu", p->param))) {
+        char *def = malloc (100+strlen(P->axis));
+        if (0==def)
+            return 0;
         sprintf (def, "break_cs2cs_recursion     proj=axisswap  axis=%s", P->axis);
         Q = proj_create (P->ctx, def);
+        free (def);
         if (0==Q)
             return 0;
         P->axisswap = skip_prep_fin(Q);
@@ -426,8 +446,12 @@ invocators can emulate the behaviour of pj_transform and the cs2cs app.
     p = pj_param_exists (P->params, "geoidgrids");
     if (p  &&  strlen (p->param) > strlen ("geoidgrids=")) {
         char *gridnames = p->param + strlen ("geoidgrids=");
+        char *def = malloc (100+strlen(gridnames));
+        if (0==def)
+            return 0;
         sprintf (def, "break_cs2cs_recursion     proj=vgridshift  grids=%s", gridnames);
         Q = proj_create (P->ctx, def);
+        free (def);
         if (0==Q)
             return 0;
         P->vgridshift = skip_prep_fin(Q);
@@ -437,8 +461,12 @@ invocators can emulate the behaviour of pj_transform and the cs2cs app.
     p = pj_param_exists (P->params, "nadgrids");
     if (p  &&  strlen (p->param) > strlen ("nadgrids=")) {
         char *gridnames = p->param + strlen ("nadgrids=");
+        char *def = malloc (100+strlen(gridnames));
+        if (0==def)
+            return 0;
         sprintf (def, "break_cs2cs_recursion     proj=hgridshift  grids=%s", gridnames);
         Q = proj_create (P->ctx, def);
+        free (def);
         if (0==Q)
             return 0;
         P->hgridshift = skip_prep_fin(Q);
@@ -447,6 +475,7 @@ invocators can emulate the behaviour of pj_transform and the cs2cs app.
     /* We ignore helmert if we have grid shift */
     p = P->hgridshift ? 0 : pj_param_exists (P->params, "towgs84");
     while (p) {
+        char *def;
         char *s = p->param;
         double *d = P->datum_params;
         size_t n = strlen (s);
@@ -455,15 +484,19 @@ invocators can emulate the behaviour of pj_transform and the cs2cs app.
         if (0==d[0] && 0==d[1] && 0==d[2] && 0==d[3] && 0==d[4] && 0==d[5] && 0==d[6])
             break;
 
-        if (n > 900)
-            return 0;
         if (n <= 8) /* 8==strlen ("towgs84=") */
             return 0;
-        sprintf (def, "break_cs2cs_recursion     proj=helmert %s", s);
+
+        def = malloc (100+n);
+        if (0==def)
+            return 0;
+        sprintf (def, "break_cs2cs_recursion     proj=helmert %s transpose", s);
         Q = proj_create (P->ctx, def);
+        pj_inherit_ellipsoid_def (P, Q);
+        free (def);
         if (0==Q)
             return 0;
-        P->helmert = skip_prep_fin(Q);
+        P->helmert = skip_prep_fin (Q);
 
         break;
     }
@@ -471,23 +504,23 @@ invocators can emulate the behaviour of pj_transform and the cs2cs app.
     /* We also need cartesian/geographical transformations if we are working in */
     /* geocentric/cartesian space or we need to do a Helmert transform.         */
     if (P->is_geocent || P->helmert) {
-        char *wgs84 = "ellps=WGS84";
-        sprintf (def, "break_cs2cs_recursion     proj=cart");
+        char def[150];
+        sprintf (def, "break_cs2cs_recursion     proj=cart   a=%40.20g  f=%40.20g", P->a, P->f);
         Q = proj_create (P->ctx, def);
         if (0==Q)
             return 0;
-        pj_inherit_ellipsoid_def(P, Q);
-        P->cart = skip_prep_fin(Q);
+        P->cart = skip_prep_fin (Q);
 
-        sprintf (def, "break_cs2cs_recursion     proj=cart  %s", wgs84);
+        sprintf (def, "break_cs2cs_recursion     proj=cart  ellps=WGS84");
         Q = proj_create (P->ctx, def);
         if (0==Q)
             return 0;
-        P->cart_wgs84 = skip_prep_fin(Q);
+        P->cart_wgs84 = skip_prep_fin (Q);
     }
 
     return 1;
 }
+
 
 
 /*************************************************************************************/
@@ -618,8 +651,23 @@ PJ *proj_destroy (PJ *P) {
     return 0;
 }
 
+/*****************************************************************************/
 int proj_errno (const PJ *P) {
+/******************************************************************************
+    Read an error level from the context of a PJ.
+******************************************************************************/
     return pj_ctx_get_errno (pj_get_ctx ((PJ *) P));
+}
+
+/*****************************************************************************/
+int proj_context_errno (PJ_CONTEXT *ctx) {
+/******************************************************************************
+    Read an error directly from a context, without going through a PJ
+    belonging to that context.
+******************************************************************************/
+    if (0==ctx)
+        ctx = pj_get_default_ctx();
+    return pj_ctx_get_errno (ctx);
 }
 
 /*****************************************************************************/
@@ -686,6 +734,7 @@ int proj_errno_reset (const PJ *P) {
 
     pj_ctx_set_errno (pj_get_ctx ((PJ *) P), 0);
     errno = 0;
+    pj_errno = 0;
     return last_errno;
 }
 
@@ -709,70 +758,113 @@ PJ_CONTEXT *proj_context_destroy (PJ_CONTEXT *ctx) {
 }
 
 
+
+
+
+
 /*****************************************************************************/
-PJ_INFO proj_info(void) {
+static char *path_append (char *buf, const char *app, size_t *buf_size) {
+/******************************************************************************
+    Helper for proj_info() below. Append app to buf, separated by a
+    semicolon. Also handle allocation of longer buffer if needed.
+
+    Returns buffer and adjusts *buf_size through provided pointer arg.
+******************************************************************************/
+    char *p;
+    size_t len, applen = 0, buflen = 0;
+#ifdef _WIN32
+    char *delim = ";";
+#else
+    char *delim = ":";
+#endif
+
+    /* Nothing to do? */
+    if (0 == app)
+        return buf;
+    applen = strlen (app);
+    if (0 == applen)
+        return buf;
+
+    /* Start checking whether buf is long enough */
+    if (0 != buf)
+        buflen = strlen (buf);
+    len = buflen+applen+strlen (delim) + 1;
+
+    /* "pj_realloc", so to speak */
+    if (*buf_size < len) {
+        p = pj_calloc (2 * len, sizeof (char));
+        if (0==p) {
+            pj_dealloc (buf);
+            return 0;
+        }
+        *buf_size = 2 * len;
+        if (buf != 0)
+            strcpy (p, buf);
+        pj_dealloc (buf);
+        buf = p;
+    }
+
+    /* Only append a semicolon if something's already there */
+    if (0 != buflen)
+        strcat (buf, ";");
+    strcat (buf, app);
+    return buf;
+}
+
+static const char *empty = {""};
+static char version[64]  = {""};
+static PJ_INFO info = {0, 0, 0, 0, 0, 0, 0, 0};
+static volatile int info_initialized = 0;
+
+/*****************************************************************************/
+PJ_INFO proj_info (void) {
 /******************************************************************************
     Basic info about the current instance of the PROJ.4 library.
 
-    Returns PJ_INFO struct. Searchpath member of the struct is truncated to 512
-    characters.
-
+    Returns PJ_INFO struct.
 ******************************************************************************/
-    PJ_INFO info;
     const char * const *paths;
-    char *tmpstr;
-    int i, n;
-    size_t len = 0;
+    size_t i, n;
 
-    memset(&info, 0, sizeof(PJ_INFO));
+    size_t  buf_size = 0;
+    char   *buf = 0;
+
+    pj_acquire_lock ();
+
+    if (0!=info_initialized) {
+        pj_release_lock ();
+        return info;
+    }
 
     info.major = PROJ_VERSION_MAJOR;
     info.minor = PROJ_VERSION_MINOR;
     info.patch = PROJ_VERSION_PATCH;
 
     /* This is a controlled environment, so no risk of sprintf buffer
-       overflow. A normal version string is xx.yy.zz which is 8 characters
-       long and there is room for 64 bytes in the version string. */
-    sprintf(info.version, "%d.%d.%d", info.major, info.minor, info.patch);
+    overflow. A normal version string is xx.yy.zz which is 8 characters
+    long and there is room for 64 bytes in the version string. */
+    sprintf (version, "%d.%d.%d", info.major, info.minor, info.patch);
 
-    pj_strlcpy(info.release, pj_get_release(), sizeof(info.release));
-
+    info.searchpath = empty;
+    info.version    = version;
+    info.release    = pj_get_release ();
 
     /* build search path string */
-    tmpstr = getenv("HOME");
-    if (tmpstr != NULL) {
-        pj_strlcpy(info.searchpath, tmpstr, sizeof(info.searchpath));
-    }
+    buf = path_append (buf, getenv ("HOME"), &buf_size);
+    buf = path_append (buf, getenv ("PROJ_LIB"), &buf_size);
 
-    tmpstr = getenv("PROJ_LIB");
-    if (tmpstr != NULL) {
-        if (strlen(info.searchpath) != 0) {
-            /* $HOME already in path */
-            strcat(info.searchpath, ";");
-            len = strlen(tmpstr);
-            strncat(info.searchpath, tmpstr, sizeof(info.searchpath)-len-1);
-        } else {
-            /* path is empty */
-            pj_strlcpy(info.searchpath, tmpstr, sizeof(info.searchpath));
-        }
-    }
+    paths = proj_get_searchpath ();
+    n = (size_t) proj_get_path_count ();
 
-    paths = proj_get_searchpath();
-    n = proj_get_path_count();
+    for (i = 0;  i < n;  i++)
+        buf = path_append (buf, paths[i], &buf_size);
+    info.searchpath = buf ? buf : empty;
 
-    for (i=0; i<n; i++) {
-        if (strlen(info.searchpath)+strlen(paths[i]) >= 511)
-            continue;
+    info.paths = paths;
+    info.path_count = n;
 
-        if (strlen(info.searchpath) != 0) {
-            strcat(info.searchpath, ";");
-            len = strlen(paths[i]);
-            strncat(info.searchpath, paths[i], sizeof(info.searchpath)-len-1);
-        } else {
-            pj_strlcpy(info.searchpath, paths[i], sizeof(info.searchpath));
-        }
-    }
-
+    info_initialized = 1;
+    pj_release_lock ();
     return info;
 }
 
@@ -783,37 +875,41 @@ PJ_PROJ_INFO proj_pj_info(PJ *P) {
     Basic info about a particular instance of a projection object.
 
     Returns PJ_PROJ_INFO struct.
-
 ******************************************************************************/
-    PJ_PROJ_INFO info;
+    PJ_PROJ_INFO pjinfo;
     char *def;
 
-    memset(&info, 0, sizeof(PJ_PROJ_INFO));
+    memset(&pjinfo, 0, sizeof(PJ_PROJ_INFO));
 
     /* Expected accuracy of the transformation. Hardcoded for now, will be improved */
     /* later. Most likely to be used when a transformation is set up with           */
     /* proj_create_crs_to_crs in a future version that leverages the EPSG database. */
-    info.accuracy = -1.0;
+    pjinfo.accuracy = -1.0;
 
-    if (!P) {
-        return info;
-    }
+    if (0==P)
+        return pjinfo;
 
     /* projection id */
     if (pj_param(P->ctx, P->params, "tproj").i)
-        pj_strlcpy(info.id, pj_param(P->ctx, P->params, "sproj").s, sizeof(info.id));
+        pjinfo.id = pj_param(P->ctx, P->params, "sproj").s;
 
     /* projection description */
-    pj_strlcpy(info.description, P->descr, sizeof(info.description));
+    pjinfo.description = P->descr;
 
     /* projection definition */
-    def = pj_get_def(P, 0); /* pj_get_def takes a non-const PJ pointer */
-    pj_strlcpy(info.definition, &def[1], sizeof(info.definition)); /* def includes a leading space */
-    pj_dealloc(def);
+    if (P->def_full)
+        def = P->def_full;
+    else
+        def = pj_get_def(P, 0); /* pj_get_def takes a non-const PJ pointer */
+    if (0==def)
+        pjinfo.definition = empty;
+    else
+        pjinfo.definition = pj_shrink (def);
+    /* Make pj_free clean this up eventually */
+    P->def_full = def;
 
-    info.has_inverse = pj_has_inverse(P);
-
-    return info;
+    pjinfo.has_inverse = pj_has_inverse(P);
+    return pjinfo;
 }
 
 
@@ -823,47 +919,49 @@ PJ_GRID_INFO proj_grid_info(const char *gridname) {
     Information about a named datum grid.
 
     Returns PJ_GRID_INFO struct.
-
 ******************************************************************************/
-    PJ_GRID_INFO info;
+    PJ_GRID_INFO grinfo;
 
     /*PJ_CONTEXT *ctx = proj_context_create(); */
     PJ_CONTEXT *ctx = pj_get_default_ctx();
     PJ_GRIDINFO *gridinfo = pj_gridinfo_init(ctx, gridname);
-    memset(&info, 0, sizeof(PJ_GRID_INFO));
+    memset(&grinfo, 0, sizeof(PJ_GRID_INFO));
 
     /* in case the grid wasn't found */
     if (gridinfo->filename == NULL) {
         pj_gridinfo_free(ctx, gridinfo);
-        strcpy(info.format, "missing");
-        return info;
+        strcpy(grinfo.format, "missing");
+        return grinfo;
     }
 
+    /* The string copies below are automatically null-terminated due to */
+    /* the memset above, so strncpy is safe */
+
     /* name of grid */
-    pj_strlcpy(info.gridname, gridname, sizeof(info.gridname));
+    strncpy (grinfo.gridname, gridname, sizeof(grinfo.gridname) - 1);
 
     /* full path of grid */
-    pj_find_file(ctx, gridname, info.filename, sizeof(info.filename));
+    pj_find_file(ctx, gridname, grinfo.filename, sizeof(grinfo.filename) - 1);
 
     /* grid format */
-    pj_strlcpy(info.format, gridinfo->format, sizeof(info.format));
+    strncpy (grinfo.format, gridinfo->format, sizeof(grinfo.format) - 1);
 
     /* grid size */
-    info.n_lon = gridinfo->ct->lim.lam;
-    info.n_lat = gridinfo->ct->lim.phi;
+    grinfo.n_lon = gridinfo->ct->lim.lam;
+    grinfo.n_lat = gridinfo->ct->lim.phi;
 
     /* cell size */
-    info.cs_lon = gridinfo->ct->del.lam;
-    info.cs_lat = gridinfo->ct->del.phi;
+    grinfo.cs_lon = gridinfo->ct->del.lam;
+    grinfo.cs_lat = gridinfo->ct->del.phi;
 
     /* bounds of grid */
-    info.lowerleft  = gridinfo->ct->ll;
-    info.upperright.lam = info.lowerleft.lam + info.n_lon*info.cs_lon;
-    info.upperright.phi = info.lowerleft.phi + info.n_lat*info.cs_lat;
+    grinfo.lowerleft  = gridinfo->ct->ll;
+    grinfo.upperright.lam = grinfo.lowerleft.lam + grinfo.n_lon*grinfo.cs_lon;
+    grinfo.upperright.phi = grinfo.lowerleft.phi + grinfo.n_lat*grinfo.cs_lat;
 
     pj_gridinfo_free(ctx, gridinfo);
 
-    return info;
+    return grinfo;
 }
 
 
@@ -882,27 +980,28 @@ PJ_INIT_INFO proj_init_info(const char *initname){
 
     If the init file is found, but the metadata is missing, the value is
     set to "Unknown".
-
 ******************************************************************************/
     int file_found;
     char param[80], key[74];
     paralist *start, *next;
-    PJ_INIT_INFO info;
+    PJ_INIT_INFO ininfo;
     PJ_CONTEXT *ctx = pj_get_default_ctx();
 
-    memset(&info, 0, sizeof(PJ_INIT_INFO));
+    memset(&ininfo, 0, sizeof(PJ_INIT_INFO));
 
-    file_found = pj_find_file(ctx, initname, info.filename, sizeof(info.filename));
+    file_found = pj_find_file(ctx, initname, ininfo.filename, sizeof(ininfo.filename));
     if (!file_found || strlen(initname) > 64) {
-        return info;
+        return ininfo;
     }
 
-    pj_strlcpy(info.name, initname, sizeof(info.name));
-    strcpy(info.origin, "Unknown");
-    strcpy(info.version, "Unknown");
-    strcpy(info.lastupdate, "Unknown");
+    /* The initial memset (0) makes strncpy safe here */
+    strncpy (ininfo.name, initname, sizeof(ininfo.name) - 1);
+    strcpy(ininfo.origin, "Unknown");
+    strcpy(ininfo.version, "Unknown");
+    strcpy(ininfo.lastupdate, "Unknown");
 
-    pj_strlcpy(key, initname, 64); /* make room for ":metadata\0" at the end */
+    strncpy (key, initname, 64); /* make room for ":metadata\0" at the end */
+    key[64] = 0;
     strncat(key, ":metadata", 9);
     strcpy(param, "+init=");
     strncat(param, key, 73);
@@ -910,30 +1009,27 @@ PJ_INIT_INFO proj_init_info(const char *initname){
     start = pj_mkparam(param);
     pj_expand_init(ctx, start);
 
-    if (pj_param(ctx, start, "tversion").i) {
-        pj_strlcpy(info.version, pj_param(ctx, start, "sversion").s, sizeof(info.version));
-    }
+    if (pj_param(ctx, start, "tversion").i)
+        strncpy(ininfo.version, pj_param(ctx, start, "sversion").s, sizeof(ininfo.version) - 1);
 
-    if (pj_param(ctx, start, "torigin").i) {
-        pj_strlcpy(info.origin, pj_param(ctx, start, "sorigin").s, sizeof(info.origin));
-    }
+    if (pj_param(ctx, start, "torigin").i)
+        strncpy(ininfo.origin, pj_param(ctx, start, "sorigin").s, sizeof(ininfo.origin) - 1);
 
-    if (pj_param(ctx, start, "tlastupdate").i) {
-        pj_strlcpy(info.lastupdate, pj_param(ctx, start, "slastupdate").s, sizeof(info.lastupdate));
-    }
+    if (pj_param(ctx, start, "tlastupdate").i)
+        strncpy(ininfo.lastupdate, pj_param(ctx, start, "slastupdate").s, sizeof(ininfo.lastupdate) - 1);
 
     for ( ; start; start = next) {
         next = start->next;
         pj_dalloc(start);
     }
 
-   return info;
+   return ininfo;
 }
 
 
 
 /*****************************************************************************/
-PJ_FACTORS proj_factors(PJ *P, LP lp) {
+PJ_FACTORS proj_factors(PJ *P, PJ_COORD lp) {
 /******************************************************************************
     Cartographic characteristics at point lp.
 
@@ -942,7 +1038,6 @@ PJ_FACTORS proj_factors(PJ *P, LP lp) {
 
     returns PJ_FACTORS. If unsuccessfull, error number is set and the
     struct returned contains NULL data.
-
 ******************************************************************************/
     PJ_FACTORS factors = {0,0,0,  0,0,0,  0,0,  0,0,0,0};
     struct FACTORS f;
@@ -950,7 +1045,7 @@ PJ_FACTORS proj_factors(PJ *P, LP lp) {
     if (0==P)
         return factors;
 
-    if (pj_factors(lp, P, 0.0, &f))
+    if (pj_factors(lp.lp, P, 0.0, &f))
         return factors;
 
     factors.meridional_scale  =  f.h;

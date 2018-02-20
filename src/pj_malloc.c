@@ -182,7 +182,7 @@ void pj_free(PJ *P) {
     /* to be called as the last step of the local destructor     */
     /* pointed to by P->destructor. In most cases,               */
     /* pj_default_destructor actually *is* what is pointed to    */
-    P->destructor (P, 0);
+    P->destructor (P, proj_errno(P));
 }
 
 
@@ -221,6 +221,7 @@ void *pj_default_destructor (PJ *P, int errlev) {   /* Destructor */
 
     /* free parameter list elements */
     pj_dealloc_params (pj_get_ctx(P), P->params, errlev);
+    pj_dealloc (P->def_full);
 
     /* free the cs2cs emulation elements */
     pj_free (P->axisswap);
