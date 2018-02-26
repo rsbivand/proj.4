@@ -7,6 +7,7 @@ wget http://download.osgeo.org/proj/proj-datumgrid-1.6.zip
 cd nad
 unzip -o ../proj-datumgrid-1.6.zip
 wget http://download.osgeo.org/proj/vdatum/egm96_15/egm96_15.gtx
+wget https://raw.githubusercontent.com/OSGeo/proj-datumgrid/master/BETA2007.gsb
 GRIDDIR=`pwd`
 echo $GRIDDIR
 cd ..
@@ -79,6 +80,10 @@ if [ $TRAVIS_OS_NAME == "osx" ]; then
       CFLAGS="--coverage" LDFLAGS="-lgcov" ./configure;
     fi
 make -j3
+PROJ_LIB=$GRIDDIR make check
+
+# Rerun tests without grids not included in proj-datumgrid
+rm -v ${GRIDDIR}/egm96_15.gtx
 PROJ_LIB=$GRIDDIR make check
 
 mv src/.libs/*.gc* src
