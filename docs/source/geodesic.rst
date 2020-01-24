@@ -3,15 +3,11 @@
 Geodesic calculations
 =====================
 
-.. contents:: Contents
-   :depth: 2
-   :backlinks: none
-
 Introduction
 ------------
 
-Consider a ellipsoid of revolution with equatorial radius :math:`a`, polar
-semi-axis :math:`b`, and flattening :math:`f=(a−b)/a`.  Points on
+Consider an ellipsoid of revolution with equatorial radius :math:`a`, polar
+semi-axis :math:`b`, and flattening :math:`f=(a-b)/a`.  Points on
 the surface of the ellipsoid are characterized by their latitude :math:`\phi`
 and longitude :math:`\lambda`.  (Note that latitude here means the
 *geographical latitude*, the angle between the normal to the ellipsoid
@@ -97,7 +93,7 @@ The routines also calculate several other quantities of interest
   On a flat surface, we have :math:`m_{12}=s_{12}`.
 * :math:`M_{12}` and :math:`M_{21}` are geodesic scales.  If two
   geodesics are parallel at point 1 and separated by a small distance
-  :\math`dt`, then they are separated by a distance :math:`M_{12}\,dt` at
+  :math:`dt`, then they are separated by a distance :math:`M_{12}\,dt` at
   point 2.  :math:`M_{21}` is defined similarly (with the geodesics
   being parallel to one another at point 2).  :math:`M_{12}` and
   :math:`M_{21}` are dimensionless quantities.  On a flat surface,
@@ -156,13 +152,14 @@ catalog of those cases:
 Background
 ----------
 
-The algorithms implemented by this package are given in [Karney2013]_
-and are based on [Bessel1825]_ and [Helmert1880]_; the algorithm for
-areas is based on [Danielsen1989]_.  These improve on the work of
-[Vincenty1975]_ in the following respects:
+The algorithms implemented by this package are given in :cite:`Karney2013`
+(`addenda <https://geographiclib.sourceforge.io/geod-addenda.html>`_)
+and are based on :cite:`Bessel1825` and :cite:`Helmert1880`; the algorithm for
+areas is based on :cite:`Danielsen1989`.  These improve on the work of
+:cite:`Vincenty1975` in the following respects:
 
 * The results are accurate to round-off for terrestrial ellipsoids (the
-  error in the distance is less then 15 nanometers, compared to 0.1 mm
+  error in the distance is less than 15 nanometers, compared to 0.1 mm
   for Vincenty).
 * The solution of the inverse problem is always found.  (Vincenty's
   method fails to converge for nearly antipodal points.)
@@ -170,5 +167,8 @@ areas is based on [Danielsen1989]_.  These improve on the work of
   geodesic.  This allows, for example, the area of a geodesic polygon to
   be computed.
 
-Additional background material is provided in [GeodesicBib]_,
-[GeodesicWiki]_, and [Karney2011]_.
+Additional background material is provided in GeographicLib's `geodesic
+bibliography <https://geographiclib.sourceforge.io/geodesic-papers/biblio.html>`_,
+Wikipedia's article "`Geodesics on an ellipsoid
+<https://en.wikipedia.org/wiki/Geodesics_on_an_ellipsoid>`_", and :cite:`Karney2011`
+(`errata <https://geographiclib.sourceforge.io/geod-addenda.html#geod-errata>`_).

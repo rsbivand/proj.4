@@ -3,5 +3,7 @@
 set -e
 
 export CCACHE_CPP2=yes
+export PROJ_DB_CACHE_DIR="$HOME/.ccache"
 
-CC="ccache clang" CFLAGS="-std=c89 -g -Wall -Wextra -Werror -Wunused-parameter -Wmissing-prototypes -Wmissing-declarations -Wformat -Werror=format-security -Wshadow -Wfloat-conversion -fsanitize=address -O2" ./travis/install.sh
+# -fno-use-cxa-atexit is needed to build with -coverage
+CC="ccache clang" CXX="ccache clang++" CFLAGS="-Werror -fsanitize=address -fno-use-cxa-atexit" CXXFLAGS="-Werror -fsanitize=address -fno-use-cxa-atexit" LDFLAGS="-fsanitize=address" ./travis/install.sh

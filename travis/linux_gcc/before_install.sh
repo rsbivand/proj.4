@@ -1,19 +1,21 @@
 #!/bin/bash
 
-./travis/before_install.sh
-
-sudo apt-get install -y cppcheck
-
-cppcheck --inline-suppr --template='{file}:{line},{severity},{id},{message}' --enable=all --inconclusive --std=posix src/*.c 2>/tmp/cppcheck.txt
-
-grep "error," /tmp/cppcheck.txt
-if [[ $? -eq 0 ]] ; then
-    echo "cppcheck failed"
-    exit 1
-fi
-
 set -e
 
-pip install --user cpp-coveralls
-./travis/docker.sh
+./travis/before_install_apt.sh
+./travis/before_install_pip.sh
 
+sudo apt-get install -qq \
+        lcov \
+        doxygen graphviz \
+        sqlite3 libsqlite3-dev \
+        libtiff-dev libcurl4-openssl-dev \
+        cppcheck
+
+scripts/cppcheck.sh
+scripts/doxygen.sh
+
+pip3 install --user sphinxcontrib-bibtex
+pip3 install --user cpp-coveralls
+
+./travis/docker.sh

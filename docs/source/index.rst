@@ -1,60 +1,37 @@
 .. _home:
 
-******************************************************************************
-proj.4
-******************************************************************************
-
-proj.4 is a standard UNIX filter function which converts geographic longitude
-and latitude coordinates into cartesian coordinates (and vice versa), and it is
-a C API for software developers to include coordinate transformation in their
-own software. proj.4 is maintained on `GitHub <http://github.com/OSGeo/proj.4/>`_.
-
-
-=============  ================================================================
- Platform                Test Status and Coverage
-=============  ================================================================
-Travis         |travis|
-AppVeyor       |appveyor|
-Coverage       |coverals|
-=============  ================================================================
-
-.. |travis| image:: https://travis-ci.org/OSGeo/proj.4.svg?branch=master
-                    :target:  https://travis-ci.org/OSGeo/proj.4
-.. |appveyor| image:: https://ci.appveyor.com/api/projects/status/584j49uguwoo5evi?svg=true
-                    :target: https://ci.appveyor.com/project/OSGeo/proj-4
-.. |coverals| image:: https://coveralls.io/repos/OSGeo/proj.4/badge.svg?branch=master
-                    :target: https://coveralls.io/r/OSGeo/proj.4?branch=master
-
-Full documentation is available as a single PDF at
-https://raw.githubusercontent.com/OSGeo/proj.4/gh-pages/proj4.pdf
-
-Documentation
-=================
+PROJ
+###############################################################################
 
 .. toctree::
-   :maxdepth: 1
+   :maxdepth: 4
+   :hidden:
 
+   about
+   news
    download
-   faq
+   install
+   usage/index
    apps/index
-   projections/index
-   parameters
+   operations/index
+   resource_files
    geodesic
-   grids
-   htpd
    development/index
+   specifications/index
+   community/index
+   faq
    glossary
-   license
-   references
+   zreferences
 
-Mailing List
-================================================================================
+.. only:: html
 
-The Proj.4 mailing list can be found at http://lists.maptools.org/mailman/listinfo/proj
+    .. include:: about_core.rst
 
-Indices and tables
-==================
+    You can download the source code for PROJ on the :ref:`download section<download>`
+    and find links to prepackaged executables in the
+    :ref:`installation section<install>`.
 
-* :ref:`genindex`
-* :ref:`search`
+    In addition to this website the PROJ documentation is also available in `PDF`_
+    form.
 
+.. _`PDF`: https://raw.githubusercontent.com/OSGeo/proj.4/gh-pages/proj.pdf

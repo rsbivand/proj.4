@@ -2,8 +2,14 @@
 
 set -e
 
-./travis/before_install.sh
+./travis/before_install_apt.sh
+./travis/before_install_pip.sh
 
-sudo apt-get update -qq
-sudo apt-get install -qq wine
-sudo apt-get install -qq mingw32
+sudo apt-get install -qq \
+        wget \
+        binutils-mingw-w64-x86-64 \
+        gcc-mingw-w64-x86-64 \
+        g++-mingw-w64-x86-64 \
+        mingw-w64-tools \
+        wine1.4-amd64 \
+        sqlite3
