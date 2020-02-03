@@ -133,9 +133,13 @@ FOR EACH ROW BEGIN
     SELECT RAISE(ABORT, 'missing GEOID18 in geoid_model')
         WHERE NOT EXISTS(SELECT 1 FROM geoid_model WHERE name = 'GEOID18');
 
-    -- check presence of NZ height shift grids
-    SELECT RAISE(ABORT, 'missing NZ height shift grids')
-        WHERE NOT EXISTS(SELECT 1 FROM grid_alternatives WHERE original_grid_name = 'auckht1946-nzvd2016.gtx');
+    -- check presence of au_ga_AUSGeoid98.tif
+    SELECT RAISE(ABORT, 'missing au_ga_AUSGeoid98.tif')
+        WHERE NOT EXISTS(SELECT 1 FROM grid_alternatives WHERE proj_grid_name = 'au_ga_AUSGeoid98.tif');
+
+    -- detect if PROJ:NTF_PARIS_TO_RGF93_GEOCENTRIC_TRANSLATION can be removed
+    SELECT RAISE(ABORT, 'PROJ:NTF_PARIS_TO_RGF93_GEOCENTRIC_TRANSLATION can probably be removed')
+        WHERE EXISTS(SELECT 1 FROM concatenated_operation_step WHERE operation_auth_name = 'EPSG' AND step_number = 2 AND step_auth_name = 'EPSG' AND step_code = '9327');
 
 END;
 INSERT INTO dummy DEFAULT VALUES;
