@@ -11,7 +11,10 @@
 ################################################################################
 cmake_minimum_required(VERSION 3.9 FATAL_ERROR)
 
-project(PROJ LANGUAGES C CXX)
+project(PROJ
+  DESCRIPTION "PROJ coordinate transformation software library"
+  LANGUAGES C CXX
+)
 
 # Only interpret if() arguments as variables or keywords when unquoted
 cmake_policy(SET CMP0054 NEW)
@@ -94,16 +97,15 @@ set(CMAKE_MODULE_PATH ${PROJ_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 
 include(ProjUtilities)
 
-message(STATUS "")
-colormsg(_HIBLUE_ "Configuring PROJ:")
+message(STATUS "Configuring PROJ:")
 
 ################################################################################
 #PROJ version information
 ################################################################################
 include(ProjVersion)
 proj_version(MAJOR 7 MINOR 0 PATCH 0)
-set(PROJ_API_VERSION "18")
-set(PROJ_BUILD_VERSION "18.0.3")
+set(PROJ_API_VERSION "19")
+set(PROJ_BUILD_VERSION "19.0.0")
 
 ################################################################################
 # Build features and variants
@@ -125,28 +127,31 @@ if(NOT SQLITE3_FOUND)
   message(SEND_ERROR "sqlite3 dependency not found!")
 endif()
 
-# Would build and run with older versons, but with horrible performance
+# Would build and run with older versions, but with horrible performance
 # See https://github.com/OSGeo/PROJ/issues/1718
-IF("${SQLITE3_VERSION}" VERSION_LESS "3.11")
+if("${SQLITE3_VERSION}" VERSION_LESS "3.11")
   message(SEND_ERROR "sqlite3 >= 3.11 required!")
-ENDIF()
+endif()
 
 ################################################################################
 # Check for libtiff
 ################################################################################
 
-option(DISABLE_TIFF "Disable TIFF support" OFF)
-mark_as_advanced(DISABLE_TIFF)
-if(DISABLE_TIFF)
-  message(WARNING "TIFF support has been disabled and will result in the inability to read some grids")
-else()
+option(ENABLE_TIFF "Enable TIFF support to read some grids" ON)
+mark_as_advanced(ENABLE_TIFF)
+set(TIFF_ENABLED FALSE)
+if(ENABLE_TIFF)
   find_package(TIFF REQUIRED)
   if(TIFF_FOUND)
-    boost_report_value(TIFF_FOUND)
+    set(TIFF_ENABLED TRUE)
   else()
-    message(SEND_ERROR "libtiff dependency not found!")
+    message(SEND_ERROR
+      "libtiff dependency not found! Use ENABLE_TIFF=OFF to force it off")
   endif()
-  add_definitions(-DTIFF_ENABLED)
+else()
+  message(WARNING
+    "TIFF support is not enabled and will result in the inability to read "
+    "some grids")
 endif()
 
 ################################################################################
@@ -154,14 +159,14 @@ endif()
 ################################################################################
 
 option(ENABLE_CURL "Enable Curl support" ON)
+set(CURL_ENABLED FALSE)
 if(ENABLE_CURL)
   find_package(CURL REQUIRED)
   if(CURL_FOUND)
-    boost_report_value(CURL_FOUND)
+    set(CURL_ENABLED TRUE)
   else()
     message(SEND_ERROR "curl dependency not found!")
   endif()
-  add_definitions(-DCURL_ENABLED)
 endif()
 
 ################################################################################
@@ -212,7 +217,7 @@ endif()
 # Put the libraries and binaries that get built into directories at the
 # top of the build tree rather than in hard-to-find leaf
 # directories. This simplifies manual testing and the use of the build
-# tree rather than installed Boost libraries.
+# tree rather than installed PROJ libraries.
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
@@ -246,9 +251,10 @@ if(DEFINED PROJ_TESTS)
   set(BUILD_TESTING ${PROJ_TESTS})
 endif()
 
-boost_report_value(BUILD_TESTING)
 if(BUILD_TESTING)
   include(ProjTest)
+else()
+  message(STATUS "Testing disabled")
 endif()
 
 ################################################################################
@@ -256,7 +262,6 @@ endif()
 ################################################################################
 include_directories(${PROJ_SOURCE_DIR}/src)
 
-message(STATUS "")
 add_subdirectory(data)
 add_subdirectory(include)
 add_subdirectory(src)
