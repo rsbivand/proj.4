@@ -3,7 +3,8 @@ DATAPATH = $(top_srcdir)/data
 pkgdata_DATA = proj.ini GL27 nad.lst nad27 nad83 world other.extra \
 		CH \
 		ITRF2000 ITRF2008 ITRF2014 proj.db \
-		projjson.schema.json
+		projjson.schema.json \
+		deformation_model.schema.json
 
 SQL_ORDERED_LIST = sql/begin.sql \
 		sql/proj_db_table_defs.sql \
@@ -43,6 +44,7 @@ EXTRA_DIST = proj.ini GL27 nad.lst nad27 nad83 \
 		CH \
 		ITRF2000 ITRF2008 ITRF2014 \
 		projjson.schema.json \
+		deformation_model.schema.json \
 		CMakeLists.txt \
 		tests/test_nodata.gtx \
 		tests/test_vgrid_bigendian_bigtiff.tif \
@@ -89,6 +91,31 @@ EXTRA_DIST = proj.ini GL27 nad.lst nad27 nad83 \
 		tests/us_noaa_geoid06_ak_subset_at_antimeridian.tif \
 		tests/test_hgrid_little_endian.gsb \
 		tests/test_hgrid_big_endian.gsb \
+		tests/test_3d_grid_projected.tif \
+		tests/BETA2007.gsb \
+		tests/MD \
+		tests/alaska \
+		tests/conus \
+		tests/egm96_15_downsampled.gtx \
+		tests/ntv1_can.dat \
+		tests/ntv2_0_downsampled.gsb \
+		tests/ntf_r93.gsb \
+		tests/simple_model_degree_3d_grid.tif \
+		tests/simple_model_degree_horizontal.json \
+		tests/simple_model_degree_3d.json \
+		tests/simple_model_metre_3d_grid.tif \
+		tests/simple_model_metre_horizontal.json \
+		tests/simple_model_metre_3d.json \
+		tests/simple_model_metre_3d_geocentric.json \
+		tests/simple_model_metre_vertical_grid.tif \
+		tests/simple_model_metre_vertical.json \
+		tests/simple_model_polar.json \
+		tests/simple_model_polar.tif \
+		tests/simple_model_wrap_east.json \
+		tests/simple_model_wrap_east.tif \
+		tests/simple_model_wrap_west.json \
+		tests/simple_model_wrap_west.tif \
+		tests/simple_model_projected.json \
 		generate_all_sql_in.cmake sql_filelist.cmake \
 		$(SQL_ORDERED_LIST)
 
@@ -127,7 +154,7 @@ proj.db: $(DATAPATH)/sql/*.sql
 	echo "" | head -c1; \
         if [ $$? -eq 0 ] ; then \
          echo "Running foreign_key_check"; \
-	 if [[ $$(echo "pragma foreign_key_check;" | sqlite3 proj.db | head -c1 | wc -c) -ne 0 ]]; then \
+	 if [ $$(echo "pragma foreign_key_check;" | sqlite3 proj.db | head -c1 | wc -c) -ne 0 ]; then \
 		echo "Foreign key check failed"; \
 		$(RM) proj.db; \
 		exit 1; \
@@ -143,6 +170,19 @@ proj.db: $(DATAPATH)/sql/*.sql
 # For out-of-tree builds, link all file of the source data dir to the generated data
 # Also link select resource files in a for_tests subdirectory so that we are not
 # influenced by the presence of other grids
+
+# egm96_15_downsampled.gtx created with
+# gdal_translate proj-datumgrid/egm96_15.gtx egm96_15_downsampled.gtx -of GTX -outsize 25% 25% -r average
+
+# ntv2_0_downsampled.gsb created with:
+# gdal_translate NTv2:0:/home/even/proj/proj-datumgrid/north-america/ntv2_0.gsb  /tmp/ntv2_0_downsampled.gsb -of NTv2 -outsize 10% 10%
+# gdal_translate NTv2:1:/home/even/proj/proj-datumgrid/north-america/ntv2_0.gsb  /tmp/ntv2_0_downsampled.gsb -of NTv2 -outsize 10% 10% -co append_subdataset=yes
+# gdal_translate NTv2:2:/home/even/proj/proj-datumgrid/north-america/ntv2_0.gsb  /tmp/ntv2_0_downsampled.gsb -of NTv2 -outsize 10% 10% -co append_subdataset=yes
+# gdal_translate NTv2:3:/home/even/proj/proj-datumgrid/north-america/ntv2_0.gsb  /tmp/ntv2_0_downsampled.gsb -of NTv2 -outsize 10% 10% -co append_subdataset=yes
+# gdal_translate NTv2:99:/home/even/proj/proj-datumgrid/north-america/ntv2_0.gsb  /tmp/ntv2_0_downsampled.gsb -of NTv2 -co append_subdataset=yes
+# gdal_translate NTv2:44:/home/even/proj/proj-datumgrid/north-america/ntv2_0.gsb  /tmp/ntv2_0_downsampled.gsb -of NTv2 -co append_subdataset=yes
+# gdal_translate NTv2:4:/home/even/proj/proj-datumgrid/north-america/ntv2_0.gsb  /tmp/ntv2_0_downsampled.gsb -of NTv2 -co append_subdataset=yes
+
 check-local:
 	@if [ ! -f GL27 ]; then \
 		for x in $(DATAPATH)/*; do \
@@ -154,24 +194,24 @@ check-local:
 	for x in $(DATAPATH)/GL27 \
 		 $(DATAPATH)/nad27 \
 		 $(DATAPATH)/nad83 \
-		 $(DATAPATH)/ntv1_can.dat \
-		 $(DATAPATH)/MD \
-		 $(DATAPATH)/ntf_r93.gsb \
-		 $(DATAPATH)/egm96_15.gtx \
-		 $(DATAPATH)/ntv2_0.gsb \
-		 $(DATAPATH)/conus \
-		 $(DATAPATH)/alaska \
-		 $(DATAPATH)/nzgd2kgrid0005.gsb \
+		 $(DATAPATH)/tests/ntv1_can.dat \
+		 $(DATAPATH)/tests/MD \
+		 $(DATAPATH)/tests/ntf_r93.gsb \
+		 $(DATAPATH)/tests/conus \
+		 $(DATAPATH)/tests/alaska \
 		 $(DATAPATH)/ITRF2000 \
-		 $(DATAPATH)/BETA2007.gsb; \
+		 $(DATAPATH)/tests/BETA2007.gsb; \
 	do \
 		if test -f "$$x" ; then \
 			ln -sf "../$$x" for_tests; \
 		else \
-			echo "WARNING: grid $$x missing: some tests will be skipped"; \
+			echo "ERROR: grid $$x missing: some tests will be skipped"; \
+			exit 1; \
 		fi \
 	done; \
 	ln -sf ../$(DATAPATH)/tests for_tests; \
+	ln -sf ../$(DATAPATH)/tests/ntv2_0_downsampled.gsb for_tests/ntv2_0.gsb; \
+	ln -sf ../$(DATAPATH)/tests/egm96_15_downsampled.gtx for_tests/egm96_15.gtx; \
 	ln -sf ../$(DATAPATH)/proj.ini for_tests; \
 	ln -sf ../proj.db for_tests
 

@@ -109,6 +109,8 @@
     "Equidistant Cylindrical (Spherical)"
 #define EPSG_CODE_METHOD_EQUIDISTANT_CYLINDRICAL_SPHERICAL 1029
 
+#define PROJ_WKT2_NAME_METHOD_FLAT_POLAR_QUARTIC "Flat Polar Quartic"
+
 #define PROJ_WKT2_NAME_METHOD_GALL_STEREOGRAPHIC "Gall Stereographic"
 
 #define PROJ_WKT2_NAME_METHOD_GOODE_HOMOLOSINE "Goode Homolosine"
@@ -200,8 +202,6 @@
 #define PROJ_WKT2_NAME_METHOD_TIMES "Times"
 
 #define PROJ_WKT2_NAME_METHOD_VAN_DER_GRINTEN "Van Der Grinten"
-
-#define PROJ_WKT2_NAME_METHOD_VERTICAL_NEAR_SIDE_PERSPECTIVE "Vertical Near Side Perspective"
 
 #define PROJ_WKT2_NAME_METHOD_WAGNER_I "Wagner I"
 #define PROJ_WKT2_NAME_METHOD_WAGNER_II "Wagner II"
@@ -537,6 +537,9 @@
 
 #define EPSG_CODE_METHOD_VERTICALGRID_NZLVD 1071
 #define EPSG_NAME_METHOD_VERTICALGRID_NZLVD "Vertical Offset by Grid Interpolation (NZLVD)"
+
+#define EPSG_CODE_METHOD_VERTICALGRID_BEV_AT 1080
+#define EPSG_NAME_METHOD_VERTICALGRID_BEV_AT "Vertical Offset by Grid Interpolation (BEV AT)"
 
 #define EPSG_CODE_METHOD_VERTICALGRID_GTX 1084
 #define EPSG_NAME_METHOD_VERTICALGRID_GTX "Vertical Offset by Grid Interpolation (gtx)"

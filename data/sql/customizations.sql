@@ -136,11 +136,77 @@ INSERT INTO "alias_name" VALUES('geodetic_datum','EPSG','6299','ire65','PROJ');
 INSERT INTO "alias_name" VALUES('geodetic_datum','EPSG','6272','nzgd49','PROJ');
 INSERT INTO "alias_name" VALUES('geodetic_datum','EPSG','6277','OSGB36','PROJ');
 
----- NTF_PARIS_TO_RGF93_GEOCENTRIC_TRANSLATION -----
+-- Given that we have installed above a WGS84 alias to the datum, add also one
+-- to the EPSG:4326 CRS, as this is a common use case (https://github.com/OSGeo/PROJ/issues/2216)
+INSERT INTO "alias_name" VALUES('geodetic_crs','EPSG','4326','WGS84','PROJ');
 
--- This is a copy of EPSG:7810 (NTF (Paris) to RGF93 (1)) which uses the deprecated EPSG:1053 operation as the second step.
--- We replace it by the non-deprecated EPSG:9327
--- Issue raised to EPSG
-INSERT INTO "concatenated_operation" VALUES('PROJ','NTF_PARIS_TO_RGF93_GEOCENTRIC_TRANSLATION','NTF (Paris) to RGF93 (1)','See transformation code 7811 for an alternative which uses the NTv2 method as an emulation of the geocentric interpolation in the second step.','Approximation to better than 1m of transformation of coordinates referenced to NTF (Paris) to RGF93.','EPSG','4807','EPSG','4171','EPSG','3694',NULL,'',0);
-INSERT INTO "concatenated_operation_step" VALUES('PROJ','NTF_PARIS_TO_RGF93_GEOCENTRIC_TRANSLATION',1,'EPSG','1763');
-INSERT INTO "concatenated_operation_step" VALUES('PROJ','NTF_PARIS_TO_RGF93_GEOCENTRIC_TRANSLATION',2,'EPSG','9327');
+---- PROJ unit short names -----
+
+-- Linear units
+UPDATE unit_of_measure SET proj_short_name = 'mm'        WHERE auth_name = 'EPSG' AND code = '1025';
+UPDATE unit_of_measure SET proj_short_name = 'cm'        WHERE auth_name = 'EPSG' AND code = '1033';
+UPDATE unit_of_measure SET proj_short_name = 'm'         WHERE auth_name = 'EPSG' AND code = '9001';
+UPDATE unit_of_measure SET proj_short_name = 'ft'        WHERE auth_name = 'EPSG' AND code = '9002';
+UPDATE unit_of_measure SET proj_short_name = 'us-ft'     WHERE auth_name = 'EPSG' AND code = '9003';
+UPDATE unit_of_measure SET proj_short_name = 'fath'      WHERE auth_name = 'EPSG' AND code = '9014';
+UPDATE unit_of_measure SET proj_short_name = 'kmi'       WHERE auth_name = 'EPSG' AND code = '9030';
+UPDATE unit_of_measure SET proj_short_name = 'us-ch'     WHERE auth_name = 'EPSG' AND code = '9033';
+UPDATE unit_of_measure SET proj_short_name = 'us-mi'     WHERE auth_name = 'EPSG' AND code = '9035';
+UPDATE unit_of_measure SET proj_short_name = 'km'        WHERE auth_name = 'EPSG' AND code = '9036';
+UPDATE unit_of_measure SET proj_short_name = 'ind-ft'    WHERE auth_name = 'EPSG' AND code = '9081';
+UPDATE unit_of_measure SET proj_short_name = 'ind-yd'    WHERE auth_name = 'EPSG' AND code = '9085';
+UPDATE unit_of_measure SET proj_short_name = 'mi'        WHERE auth_name = 'EPSG' AND code = '9093';
+UPDATE unit_of_measure SET proj_short_name = 'yd'        WHERE auth_name = 'EPSG' AND code = '9096';
+UPDATE unit_of_measure SET proj_short_name = 'ch'        WHERE auth_name = 'EPSG' AND code = '9097';
+UPDATE unit_of_measure SET proj_short_name = 'link'      WHERE auth_name = 'EPSG' AND code = '9098';
+
+-- Angular units
+UPDATE unit_of_measure SET proj_short_name = 'rad'       WHERE auth_name = 'EPSG' AND code = '9101';
+UPDATE unit_of_measure SET proj_short_name = 'deg'       WHERE auth_name = 'EPSG' AND code = '9102';
+UPDATE unit_of_measure SET proj_short_name = 'grad'      WHERE auth_name = 'EPSG' AND code = '9105';
+
+-- PROJ specific units
+INSERT INTO "unit_of_measure" VALUES('PROJ','DM','decimeter','length',0.01,'dm',0);
+INSERT INTO "unit_of_measure" VALUES('PROJ','IN','inch','length',0.0254,'in',0);
+INSERT INTO "unit_of_measure" VALUES('PROJ','US_IN','US survey inch','length',0.025400050800101,'us-in',0);
+INSERT INTO "unit_of_measure" VALUES('PROJ','US_YD','US survey yard','length',0.914401828803658,'us-yd',0);
+INSERT INTO "unit_of_measure" VALUES('PROJ','IND_CH','Indian chain','length',20.11669506,'ind-ch',0);
+
+-- Deal with grid_transformation using EPSG:9635 'Geog3D to Geog2D+GravityRelatedHeight (US .gtx)' method
+-- We derive records using the more classic 'Geographic3D to GravityRelatedHeight' method
+-- We could probably do that at runtime too, but more simple and efficient to create records
+
+INSERT INTO "grid_transformation"
+SELECT
+    'PROJ' AS auth_name,
+    gt.auth_name || '_' || gt.code || '_RESTRICTED_TO_VERTCRS' AS code,
+    gcrs.name || ' to ' || vcrs.name || ' (from ' || gt.name || ')' AS name,
+    NULL AS description,
+    gt.scope,
+    'EPSG' AS method_auth_name,
+    '9665' AS method_code,
+    'Geographic3D to GravityRelatedHeight (gtx)' AS method_name,
+    gt.source_crs_auth_name,
+    gt.source_crs_code,
+    c.vertical_crs_auth_name AS target_crs_auth_name,
+    c.vertical_crs_code AS target_crs_code,
+    gt.area_of_use_auth_name,
+    gt.area_of_use_code,
+    gt.accuracy,
+    gt.grid_param_auth_name,
+    gt.grid_param_code,
+    gt.grid_param_name,
+    gt.grid_name,
+    gt.grid2_param_auth_name,
+    gt.grid2_param_code,
+    gt.grid2_param_name,
+    gt.grid2_name,
+    gt.interpolation_crs_auth_name,
+    gt.interpolation_crs_code,
+    gt.operation_version,
+    gt.deprecated
+FROM grid_transformation gt
+JOIN compound_crs c ON gt.target_crs_code = c.code AND gt.target_crs_auth_name = c.auth_name
+JOIN geodetic_crs gcrs ON gt.source_crs_auth_name = gcrs.auth_name AND gt.source_crs_code = gcrs.code
+JOIN vertical_crs vcrs on vcrs.auth_name = c.vertical_crs_auth_name AND vcrs.code = c.vertical_crs_code
+WHERE method_auth_name = 'EPSG' AND method_code = '9635' AND gt.deprecated = 0;

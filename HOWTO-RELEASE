@@ -63,7 +63,7 @@ Update the following files with the new ABI version number:
 Man pages are (mostly) automatically generated from the Sphinx docs. Follow
 these steps:
 
-    - Temporarily update version in `docs/source/conf.py`
+    - Temporarily update `version` and `data_version` in `docs/source/conf.py`
     - run `scripts/update_man.sh`
     - Revert version number in `docs/source/conf.py`
 
@@ -176,9 +176,17 @@ See step 1.6 above. Do not rename the archives with RC postfixes.
 ------------------------------------------------------------------------------
 
   - Add the release notes from `NEWS` to `docs/source/news.rst`
+
+    These vim substitutions are helpfull when converting NEWS to rst:
+
+    :!(\#(\d\{4}\))!(`\#\1 <https://github.com/OSGeo/issues/\1>`_)!
+    :s/^o/*/
+
   - Update download links in `docs/source/download.rst`
   - Update `$TRAVIS_BRANCH` in `travis\after_success.sh` to new maintenance
     branch.
+
+
 
 *Commit the changes to master and cherry-pick into maintenance branch.*
 

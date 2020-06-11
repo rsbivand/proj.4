@@ -14,6 +14,7 @@ CREATE TABLE unit_of_measure(
     name TEXT NOT NULL CHECK (length(name) >= 2),
     type TEXT NOT NULL CHECK (type IN ('length', 'angle', 'scale', 'time')),
     conv_factor FLOAT,
+    proj_short_name TEXT, -- PROJ string name, like 'm', 'ft'. Might be NULL
     deprecated BOOLEAN NOT NULL CHECK (deprecated IN (0, 1)),
     CONSTRAINT pk_unit_of_measure PRIMARY KEY (auth_name, code)
 );
@@ -681,7 +682,7 @@ FOR EACH ROW BEGIN
         WHERE EXISTS (SELECT 1 FROM crs_view WHERE crs_view.auth_name = NEW.auth_name AND crs_view.code = NEW.code);
 
     SELECT RAISE(ABORT, 'insert on projected_crs violates constraint: geodetic_crs must not be deprecated when projected_crs is not deprecated')
-        WHERE EXISTS(SELECT 1 FROM geodetic_crs WHERE geodetic_crs.auth_name = NEW.geodetic_crs_auth_name AND geodetic_crs.code = NEW.geodetic_crs_code AND geodetic_crs.deprecated != 0) AND NEW.deprecated = 0 AND NOT (NEW.auth_name = 'ESRI' AND NEW.geodetic_crs_auth_name != 'ESRI');
+        WHERE EXISTS(SELECT 1 FROM geodetic_crs WHERE geodetic_crs.auth_name = NEW.geodetic_crs_auth_name AND geodetic_crs.code = NEW.geodetic_crs_code AND geodetic_crs.deprecated != 0 AND geodetic_crs.name NOT LIKE 'Unknown datum%' AND geodetic_crs.name NOT LIKE 'Unspecified datum%') AND NEW.deprecated = 0 AND NOT (NEW.auth_name = 'ESRI' AND NEW.geodetic_crs_auth_name != 'ESRI');
 
     SELECT RAISE(ABORT, 'insert on projected_crs violates constraint: conversion must exist when text_definition is NULL')
         WHERE NOT EXISTS(SELECT 1 FROM conversion WHERE conversion.auth_name = NEW.conversion_auth_name AND conversion.code = NEW.conversion_code) AND NEW.text_definition IS NULL;
@@ -1339,6 +1340,8 @@ CREATE TABLE alias_name(
     source TEXT
 );
 
+CREATE INDEX idx_alias_name_code ON alias_name(code);
+
 CREATE TRIGGER alias_name_insert_trigger
 BEFORE INSERT ON alias_name
 FOR EACH ROW BEGIN
@@ -1364,7 +1367,8 @@ CREATE TABLE supersession(
         'helmert_transformation', 'other_transformation', 'concatenated_operation')),
     replacement_auth_name TEXT NOT NULL,
     replacement_code TEXT NOT NULL,
-    source TEXT
+    source TEXT,
+    same_source_target_crs BOOLEAN NOT NULL CHECK (same_source_target_crs IN (0, 1)) -- for transformations, whether the (source_crs, target_crs) of the replacement transfrm is the same as the superseded one
 );
 
 CREATE INDEX idx_supersession ON supersession(superseded_table_name, superseded_auth_name, superseded_code);

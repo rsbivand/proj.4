@@ -23,7 +23,7 @@ PROJ will attempt to locate its resource files - database, transformation grids
 or init-files - from several directories.
 The following paths are checked in order:
 
-- For resource files that have an explict relative or absolute path,
+- For resource files that have an explicit relative or absolute path,
   the directory specified in the filename.
 
 - Path resolved by the callback function set with
@@ -95,10 +95,10 @@ Its default content is:
     ;
 
     ; Network capabilities disabled by default.
-    ; Can be overriden with the PROJ_NETWORK=ON environment variable.
+    ; Can be overridden with the PROJ_NETWORK=ON environment variable.
     ; network = on
 
-    ; Can be overriden with the PROJ_NETWORK_ENDPOINT environment variable.
+    ; Can be overridden with the PROJ_NETWORK_ENDPOINT environment variable.
     cdn_endpoint = https://cdn.proj.org
 
     cache_enabled = on
@@ -106,6 +106,14 @@ Its default content is:
     cache_size_MB = 300
 
     cache_ttl_sec = 86400
+
+    ; Transverse Mercator (and UTM) default algorithm: auto, evenden_snyder or poder_engsager
+    ; * evenden_snyder is the fastest, but less accurate far from central meridian
+    ; * poder_engsager is slower, but more accurate far from central meridian
+    ; * default will auto-select between the two above depending on the coordinate
+    ;   to transform and will use evenden_snyder if the error in doing so is below
+    ;   0.1 mm (for an ellipsoid of the size of Earth)
+    tmerc_default_algo = poder_engsager
 
 
 Transformation grids
@@ -123,10 +131,27 @@ all formats. Using GDAL for construction of new grids is recommended.
 External resources and packaged grids
 -------------------------------------------------------------------------------
 
+proj-data
++++++++++
+
+The ``proj-data`` package is a collection of all the resource files that are
+freely available for use with PROJ. The package is maintained on
+`GitHub <https://github.com/OSGeo/PROJ-data>`_ and the contents of the package
+are show-cased on the `PROJ CDN <https://cdn.proj.org/>`_. The contents of the
+package can be installed using the :program:`projsync` package or by downloading
+the zip archive of the package and unpacking in the :envvar:`PROJ_LIB` directory.
+
 proj-datumgrid
 ++++++++++++++
 
-For a functioning PROJ, installation of the
+.. note::
+
+    The packages described below can be used with PROJ 7 and later but are
+    primarily meant to be used with PROJ 6 and earlier versions. The proj-datumgrid
+    series of packages are not maintained anymore and are only kept available for
+    legacy purposes.
+
+For a functioning builds of PROJ prior to version 7, installation of the
 `proj-datumgrid <https://github.com/OSGeo/proj-datumgrid>`_ is needed. If you
 have installed PROJ from a package system chances are that this will already be
 done for you. The *proj-datumgrid* package provides transformation grids that
@@ -273,7 +298,7 @@ Getting crs2crs2grid.py
 ................................................................................
 
 The `crs2crs2grid.py` script can be found at
-https://github.com/OSGeo/gdal/tree/trunk/gdal/swig/python/samples/crs2crs2grid.py
+https://github.com/OSGeo/gdal/tree/master/gdal/swig/python/samples/crs2crs2grid.py
 
 The script depends on having the GDAL Python bindings operational; if they are not you
 will get an error such as:

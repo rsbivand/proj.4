@@ -1,7 +1,7 @@
 /******************************************************************************
  *
  * Project:  PROJ
- * Purpose:  C API wraper of C++ API
+ * Purpose:  C API wrapper of C++ API
  * Author:   Even Rouault <even dot rouault at spatialys dot com>
  *
  ******************************************************************************
@@ -216,11 +216,16 @@ struct PJ_OBJ_LIST {
 
     explicit PJ_OBJ_LIST(std::vector<IdentifiedObjectNNPtr> &&objectsIn)
         : objects(std::move(objectsIn)) {}
+    virtual ~PJ_OBJ_LIST();
 
     PJ_OBJ_LIST(const PJ_OBJ_LIST &) = delete;
     PJ_OBJ_LIST &operator=(const PJ_OBJ_LIST &) = delete;
     //! @endcond
 };
+
+//! @cond Doxygen_Suppress
+PJ_OBJ_LIST::~PJ_OBJ_LIST() = default;
+//! @endcond
 
 // ---------------------------------------------------------------------------
 
@@ -343,6 +348,10 @@ const char *proj_context_get_database_metadata(PJ_CONTEXT *ctx,
         // temporary variable must be used as getDBcontext() might create
         // ctx->cpp_context
         auto osVal(getDBcontext(ctx)->getMetadata(key));
+        if (osVal == nullptr) {
+            ctx->cpp_context->autoCloseDbIfNeeded();
+            return nullptr;
+        }
         ctx->cpp_context->lastDbMetadataItem_ = osVal;
         ctx->cpp_context->autoCloseDbIfNeeded();
         return ctx->cpp_context->lastDbMetadataItem_.c_str();
@@ -422,7 +431,9 @@ PJ *proj_clone(PJ_CONTEXT *ctx, const PJ *obj) {
 
 /** \brief Instantiate an object from a WKT string, PROJ string, object code
  * (like "EPSG:4326", "urn:ogc:def:crs:EPSG::4326",
- * "urn:ogc:def:coordinateOperation:EPSG::1671") or PROJJSON string.
+ * "urn:ogc:def:coordinateOperation:EPSG::1671"), a PROJJSON string, an object
+ * name (e.g "WGS 84") of a compound CRS build from object names
+ * (e.g "WGS 84 + EGM96 height")
  *
  * This function calls osgeo::proj::io::createFromUserInput()
  *
@@ -662,7 +673,8 @@ PJ *proj_create_from_database(PJ_CONTEXT *ctx, const char *auth_name,
 // ---------------------------------------------------------------------------
 
 //! @cond Doxygen_Suppress
-static const char *get_unit_category(UnitOfMeasure::Type type) {
+static const char *get_unit_category(const std::string &unit_name,
+                                     UnitOfMeasure::Type type) {
     const char *ret = nullptr;
     switch (type) {
     case UnitOfMeasure::Type::UNKNOWN:
@@ -672,19 +684,26 @@ static const char *get_unit_category(UnitOfMeasure::Type type) {
         ret = "none";
         break;
     case UnitOfMeasure::Type::ANGULAR:
-        ret = "angular";
+        ret = unit_name.find(" per ") != std::string::npos ? "angular_per_time"
+                                                           : "angular";
         break;
     case UnitOfMeasure::Type::LINEAR:
-        ret = "linear";
+        ret = unit_name.find(" per ") != std::string::npos ? "linear_per_time"
+                                                           : "linear";
         break;
     case UnitOfMeasure::Type::SCALE:
-        ret = "scale";
+        ret = unit_name.find(" per year") != std::string::npos ||
+                      unit_name.find(" per second") != std::string::npos
+                  ? "scale_per_time"
+                  : "scale";
         break;
     case UnitOfMeasure::Type::TIME:
         ret = "time";
         break;
     case UnitOfMeasure::Type::PARAMETRIC:
-        ret = "parametric";
+        ret = unit_name.find(" per ") != std::string::npos
+                  ? "parametric_per_time"
+                  : "parametric";
         break;
     }
     return ret;
@@ -704,8 +723,9 @@ static const char *get_unit_category(UnitOfMeasure::Type type) {
  * @param out_conv_factor Pointer to a value to store the conversion
  * factor of the prime meridian longitude unit to radian. or NULL
  * @param out_category Pointer to a string value to store the parameter name. or
- * NULL. This value might be "unknown", "none", "linear", "angular", "scale",
- * "time" or "parametric";
+ * NULL. This value might be "unknown", "none", "linear", "linear_per_time",
+ * "angular", "angular_per_time", "scale", "scale_per_time", "time",
+ * "parametric" or "parametric_per_time"
  * @return TRUE in case of success
  */
 int proj_uom_get_info_from_database(PJ_CONTEXT *ctx, const char *auth_name,
@@ -726,7 +746,7 @@ int proj_uom_get_info_from_database(PJ_CONTEXT *ctx, const char *auth_name,
             *out_conv_factor = obj->conversionToSI();
         }
         if (out_category) {
-            *out_category = get_unit_category(obj->type());
+            *out_category = get_unit_category(obj->name(), obj->type());
         }
         ctx->cpp_context->autoCloseDbIfNeeded();
         return true;
@@ -1338,7 +1358,7 @@ const char *proj_get_id_code(const PJ *obj, int index) {
  * supported options are:
  * <ul>
  * <li>MULTILINE=YES/NO. Defaults to YES, except for WKT1_ESRI</li>
- * <li>INDENTATION_WIDTH=number. Defauls to 4 (when multiline output is
+ * <li>INDENTATION_WIDTH=number. Defaults to 4 (when multiline output is
  * on).</li>
  * <li>OUTPUT_AXIS=AUTO/YES/NO. In AUTO mode, axis will be output for WKT2
  * variants, for WKT1_GDAL for ProjectedCRS with easting/northing ordering
@@ -1508,7 +1528,7 @@ const char *proj_as_proj_string(PJ_CONTEXT *ctx, const PJ *obj,
  * supported options are:
  * <ul>
  * <li>MULTILINE=YES/NO. Defaults to YES</li>
- * <li>INDENTATION_WIDTH=number. Defauls to 2 (when multiline output is
+ * <li>INDENTATION_WIDTH=number. Defaults to 2 (when multiline output is
  * on).</li>
  * <li>SCHEMA=string. URL to PROJJSON schema. Can be set to empty string to
  * disable it.</li>
@@ -2220,8 +2240,8 @@ PJ *proj_get_target_crs(PJ_CONTEXT *ctx, const PJ *obj) {
  * </li>
  * <li>90% means that CRS are equivalent, but the names are not exactly the
  * same.</li>
- * <li>70% means that CRS are equivalent), but the names do not match at
- * all.</li>
+ * <li>70% means that CRS are equivalent, but the names are not equivalent.
+ * </li>
  * <li>25% means that the CRS are not equivalent, but there is some similarity
  * in
  * the names.</li>
@@ -2577,6 +2597,100 @@ void proj_crs_info_list_destroy(PROJ_CRS_INFO **list) {
             pj_dalloc(list[i]->name);
             pj_dalloc(list[i]->area_name);
             pj_dalloc(list[i]->projection_method_name);
+            delete list[i];
+        }
+        delete[] list;
+    }
+}
+
+// ---------------------------------------------------------------------------
+
+/** \brief Enumerate units from the database, taking into account various
+ * criteria.
+ *
+ * The returned object is an array of PROJ_UNIT_INFO* pointers, whose last
+ * entry is NULL. This array should be freed with proj_unit_list_destroy()
+ *
+ * @param ctx PROJ context, or NULL for default context
+ * @param auth_name Authority name, used to restrict the search.
+ * Or NULL for all authorities.
+ * @param category Filter by category, if this parameter is not NULL. Category
+ * is one of "linear", "linear_per_time", "angular", "angular_per_time",
+ * "scale", "scale_per_time" or "time"
+ * @param allow_deprecated whether we should return deprecated objects as well.
+ * @param out_result_count Output parameter pointing to an integer to receive
+ * the size of the result list. Might be NULL
+ * @return an array of PROJ_UNIT_INFO* pointers to be freed with
+ * proj_unit_list_destroy(), or NULL in case of error.
+ *
+ * @since 7.1
+ */
+PROJ_UNIT_INFO **proj_get_units_from_database(PJ_CONTEXT *ctx,
+                                              const char *auth_name,
+                                              const char *category,
+                                              int allow_deprecated,
+                                              int *out_result_count) {
+    SANITIZE_CTX(ctx);
+    PROJ_UNIT_INFO **ret = nullptr;
+    int i = 0;
+    try {
+        auto factory = AuthorityFactory::create(getDBcontext(ctx),
+                                                auth_name ? auth_name : "");
+        auto list = factory->getUnitList();
+        ret = new PROJ_UNIT_INFO *[list.size() + 1];
+        for (const auto &info : list) {
+            if (category && info.category != category) {
+                continue;
+            }
+            if (!allow_deprecated && info.deprecated) {
+                continue;
+            }
+            ret[i] = new PROJ_UNIT_INFO;
+            ret[i]->auth_name = pj_strdup(info.authName.c_str());
+            ret[i]->code = pj_strdup(info.code.c_str());
+            ret[i]->name = pj_strdup(info.name.c_str());
+            ret[i]->category = pj_strdup(info.category.c_str());
+            ret[i]->conv_factor = info.convFactor;
+            ret[i]->proj_short_name =
+                info.projShortName.empty()
+                    ? nullptr
+                    : pj_strdup(info.projShortName.c_str());
+            ret[i]->deprecated = info.deprecated;
+            i++;
+        }
+        ret[i] = nullptr;
+        if (out_result_count)
+            *out_result_count = i;
+        ctx->cpp_context->autoCloseDbIfNeeded();
+        return ret;
+    } catch (const std::exception &e) {
+        proj_log_error(ctx, __FUNCTION__, e.what());
+        if (ret) {
+            ret[i + 1] = nullptr;
+            proj_unit_list_destroy(ret);
+        }
+        if (out_result_count)
+            *out_result_count = 0;
+    }
+    ctx->cpp_context->autoCloseDbIfNeeded();
+    return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+
+/** \brief Destroy the result returned by
+ * proj_get_units_from_database().
+ *
+ * @since 7.1
+ */
+void proj_unit_list_destroy(PROJ_UNIT_INFO **list) {
+    if (list) {
+        for (int i = 0; list[i] != nullptr; i++) {
+            pj_dalloc(list[i]->auth_name);
+            pj_dalloc(list[i]->code);
+            pj_dalloc(list[i]->name);
+            pj_dalloc(list[i]->category);
+            pj_dalloc(list[i]->proj_short_name);
             delete list[i];
         }
         delete[] list;
@@ -3088,7 +3202,7 @@ PJ *proj_create_vertical_crs(PJ_CONTEXT *ctx, const char *crs_name,
  * use.
  * It should be used by at most one thread at a time.
  *
- * This is an extented (_ex) version of proj_create_vertical_crs() that adds
+ * This is an extended (_ex) version of proj_create_vertical_crs() that adds
  * the capability of defining a geoid model.
  *
  * @param ctx PROJ context, or NULL for default context
@@ -6620,7 +6734,7 @@ int proj_coordoperation_is_instantiable(PJ_CONTEXT *ctx,
     auto dbContext = getDBcontextNoException(ctx, __FUNCTION__);
     try {
         auto ret = op->isPROJInstantiable(
-                       dbContext, proj_context_is_network_enabled(ctx) != false)
+                       dbContext, proj_context_is_network_enabled(ctx) != FALSE)
                        ? 1
                        : 0;
         if (ctx->cpp_context) {
@@ -6749,8 +6863,9 @@ int proj_coordoperation_get_param_index(PJ_CONTEXT *ctx,
  * unit code. or NULL
  * @param out_unit_category Pointer to a string value to store the parameter
  * name. or
- * NULL. This value might be "unknown", "none", "linear", "angular", "scale",
- * "time" or "parametric";
+ * NULL. This value might be "unknown", "none", "linear", "linear_per_time",
+ * "angular", "angular_per_time", "scale", "scale_per_time", "time",
+ * "parametric" or "parametric_per_time"
  * @return TRUE in case of success.
  */
 
@@ -6852,7 +6967,8 @@ int proj_coordoperation_get_param(
                 *out_unit_code = unit.code().c_str();
             }
             if (out_unit_category) {
-                *out_unit_category = get_unit_category(unit.type());
+                *out_unit_category =
+                    get_unit_category(unit.name(), unit.type());
             }
         }
     }
@@ -6935,7 +7051,7 @@ int proj_coordoperation_get_grid_used_count(PJ_CONTEXT *ctx,
         if (!coordoperation->gridsNeededAsked) {
             coordoperation->gridsNeededAsked = true;
             const auto gridsNeeded = co->gridsNeeded(
-                dbContext, proj_context_is_network_enabled(ctx) != false);
+                dbContext, proj_context_is_network_enabled(ctx) != FALSE);
             for (const auto &gridDesc : gridsNeeded) {
                 coordoperation->gridsNeeded.emplace_back(gridDesc);
             }
@@ -7322,7 +7438,7 @@ void proj_operation_factory_context_set_use_proj_alternative_grid_names(
  * step.
  *
  * By default, with the IF_NO_DIRECT_TRANSFORMATION stratgey, all potential
- * C candidates will be used if there is no direct tranformation.
+ * C candidates will be used if there is no direct transformation.
  *
  * @param ctx PROJ context, or NULL for default context
  * @param factory_ctx Operation factory context. must not be NULL
@@ -7406,6 +7522,83 @@ void PROJ_DLL proj_operation_factory_context_set_discard_superseded(
 
 // ---------------------------------------------------------------------------
 
+/** \brief Set whether ballpark transformations are allowed.
+ *
+ * @param ctx PROJ context, or NULL for default context
+ * @param factory_ctx Operation factory context. must not be NULL
+ * @param allow set to TRUE to allow ballpark transformations.
+ * @since 7.1
+ */
+void PROJ_DLL proj_operation_factory_context_set_allow_ballpark_transformations(
+    PJ_CONTEXT *ctx, PJ_OPERATION_FACTORY_CONTEXT *factory_ctx, int allow) {
+    SANITIZE_CTX(ctx);
+    assert(factory_ctx);
+    try {
+        factory_ctx->operationContext->setAllowBallparkTransformations(allow !=
+                                                                       0);
+    } catch (const std::exception &e) {
+        proj_log_error(ctx, __FUNCTION__, e.what());
+    }
+}
+
+// ---------------------------------------------------------------------------
+
+//! @cond Doxygen_Suppress
+/** \brief Opaque object representing a set of operation results. */
+struct PJ_OPERATION_LIST : PJ_OBJ_LIST {
+
+    PJ *source_crs;
+    PJ *target_crs;
+    bool hasPreparedOperation = false;
+    std::vector<CoordOperation> preparedOperations{};
+
+    explicit PJ_OPERATION_LIST(PJ_CONTEXT *ctx, const PJ *source_crsIn,
+                               const PJ *target_crsIn,
+                               std::vector<IdentifiedObjectNNPtr> &&objectsIn);
+    ~PJ_OPERATION_LIST() override;
+
+    PJ_OPERATION_LIST(const PJ_OPERATION_LIST &) = delete;
+    PJ_OPERATION_LIST &operator=(const PJ_OPERATION_LIST &) = delete;
+
+    const std::vector<CoordOperation> &getPreparedOperations(PJ_CONTEXT *ctx);
+};
+
+// ---------------------------------------------------------------------------
+
+PJ_OPERATION_LIST::PJ_OPERATION_LIST(
+    PJ_CONTEXT *ctx, const PJ *source_crsIn, const PJ *target_crsIn,
+    std::vector<IdentifiedObjectNNPtr> &&objectsIn)
+    : PJ_OBJ_LIST(std::move(objectsIn)),
+      source_crs(proj_clone(ctx, source_crsIn)),
+      target_crs(proj_clone(ctx, target_crsIn)) {}
+
+// ---------------------------------------------------------------------------
+
+PJ_OPERATION_LIST::~PJ_OPERATION_LIST() {
+    auto tmpCtxt = proj_context_create();
+    proj_assign_context(source_crs, tmpCtxt);
+    proj_assign_context(target_crs, tmpCtxt);
+    proj_destroy(source_crs);
+    proj_destroy(target_crs);
+    proj_context_destroy(tmpCtxt);
+}
+
+// ---------------------------------------------------------------------------
+
+const std::vector<CoordOperation> &
+PJ_OPERATION_LIST::getPreparedOperations(PJ_CONTEXT *ctx) {
+    if (!hasPreparedOperation) {
+        hasPreparedOperation = true;
+        preparedOperations =
+            pj_create_prepared_operations(ctx, source_crs, target_crs, this);
+    }
+    return preparedOperations;
+}
+
+//! @endcond
+
+// ---------------------------------------------------------------------------
+
 /** \brief Find a list of CoordinateOperation from source_crs to target_crs.
  *
  * The operations are sorted with the most relevant ones first: by
@@ -7457,11 +7650,60 @@ proj_create_operations(PJ_CONTEXT *ctx, const PJ *source_crs,
         for (const auto &op : ops) {
             objects.emplace_back(op);
         }
-        return new PJ_OBJ_LIST(std::move(objects));
+        return new PJ_OPERATION_LIST(ctx, source_crs, target_crs,
+                                     std::move(objects));
     } catch (const std::exception &e) {
         proj_log_error(ctx, __FUNCTION__, e.what());
         return nullptr;
     }
+}
+
+// ---------------------------------------------------------------------------
+
+/** Return the index of the operation that would be the most appropriate to
+ * transform the specified coordinates.
+ *
+ * This operation may use resources that are not locally available, depending
+ * on the search criteria used by proj_create_operations().
+ *
+ * This could be done by using proj_create_operations() with a punctual bounding
+ * box, but this function is faster when one needs to evaluate on many points
+ * with the same (source_crs, target_crs) tuple.
+ *
+ * @param ctx PROJ context, or NULL for default context
+ * @param operations List of operations returned by proj_create_operations()
+ * @param direction Direction into which to transform the point.
+ * @param coord Coordinate to transform
+ * @return the index in operations that would be used to transform coord. Or -1
+ * in case of error, or no match.
+ *
+ * @since 7.1
+ */
+int proj_get_suggested_operation(PJ_CONTEXT *ctx, PJ_OBJ_LIST *operations,
+                                 PJ_DIRECTION direction, PJ_COORD coord) {
+    SANITIZE_CTX(ctx);
+    auto opList = dynamic_cast<PJ_OPERATION_LIST *>(operations);
+    if (opList == nullptr) {
+        proj_log_error(ctx, __FUNCTION__,
+                       "operations is not a list of operations");
+        return -1;
+    }
+
+    // Special case:
+    // proj_create_crs_to_crs_from_pj() always use the unique operation
+    // if there's a single one
+    if (opList->objects.size() == 1) {
+        return 0;
+    }
+
+    int iExcluded[2] = {-1, -1};
+    const auto &preparedOps = opList->getPreparedOperations(ctx);
+    int idx = pj_get_suggested_operation(ctx, preparedOps, iExcluded, direction,
+                                         coord);
+    if (idx >= 0) {
+        idx = preparedOps[idx].idxInOriginalList;
+    }
+    return idx;
 }
 
 // ---------------------------------------------------------------------------
@@ -7787,8 +8029,8 @@ PJ *proj_normalize_for_visualization(PJ_CONTEXT *ctx, const PJ *obj) {
                         }
                     }
                     pjNew->alternativeCoordinateOperations.emplace_back(
-                        minxSrc, minySrc, maxxSrc, maxySrc, minxDst, minyDst,
-                        maxxDst, maxyDst,
+                        alt.idxInOriginalList, minxSrc, minySrc, maxxSrc,
+                        maxySrc, minxDst, minyDst, maxxDst, maxyDst,
                         pj_obj_create(ctx, co->normalizeForVisualization()),
                         co->nameStr(), alt.accuracy, alt.isOffshore);
                 }

@@ -173,7 +173,7 @@ Note that if you're using conda, activating an environment sets
 :envvar:`PROJ_LIB` to a resource directory located in that environment.
 
 
-What happend to PROJ.4?
+What happened to PROJ.4?
 --------------------------------------------------------------------------------
 
 The first incarnation of PROJ saw the light of day in 1983. Back then it
@@ -188,6 +188,6 @@ was no longer aligned with the version number. As a consequence, it was
 decided to decouple the name from the version number and once again simply
 call the software PROJ.
 
-Use of name PROJ.4 is now strictly reserved for describing legacy behaviour
+Use of name PROJ.4 is now strictly reserved for describing legacy behavior
 of the software, e.g. "PROJ.4 strings" as seen in :program:`projinfo`
 output.

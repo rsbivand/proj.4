@@ -513,7 +513,7 @@ static const ParamMapping paramViewpointHeight = {
 static const ParamMapping *const paramsVerticalPerspective[] = {
     &paramLatTopoOrigin,
     &paramLonTopoOrigin,
-    &paramHeightTopoOrigin,
+    &paramHeightTopoOrigin, // unsupported by PROJ right now
     &paramViewpointHeight,
     &paramFalseEasting,  // PROJ addition
     &paramFalseNorthing, // PROJ addition
@@ -627,6 +627,9 @@ static const MethodMapping projectionMethodMappings[] = {
     {EPSG_NAME_METHOD_EQUIDISTANT_CYLINDRICAL_SPHERICAL,
      EPSG_CODE_METHOD_EQUIDISTANT_CYLINDRICAL_SPHERICAL, "Equirectangular",
      "eqc", nullptr, paramsEqc},
+
+    {PROJ_WKT2_NAME_METHOD_FLAT_POLAR_QUARTIC, 0, "Flat_Polar_Quartic",
+     "mbtfpq", nullptr, paramsLonNatOrigin},
 
     {PROJ_WKT2_NAME_METHOD_GALL_STEREOGRAPHIC, 0, "Gall_Stereographic", "gall",
      nullptr, paramsLonNatOrigin},
@@ -747,9 +750,6 @@ static const MethodMapping projectionMethodMappings[] = {
     {PROJ_WKT2_NAME_METHOD_VAN_DER_GRINTEN, 0, "VanDerGrinten", "vandg", "R_A",
      paramsLonNatOrigin},
 
-    {PROJ_WKT2_NAME_METHOD_VERTICAL_NEAR_SIDE_PERSPECTIVE, 0,
-     "Vertical_Near_Side_Perspective", "nsper", nullptr, paramsLonNatOrigin},
-
     {PROJ_WKT2_NAME_METHOD_WAGNER_I, 0, "Wagner_I", "wag1", nullptr,
      paramsLonNatOrigin},
 
@@ -795,6 +795,9 @@ static const MethodMapping projectionMethodMappings[] = {
 
     {"Quartic Authalic", 0, "Quartic_Authalic", "qua_aut", nullptr,
      paramsLonNatOrigin},
+
+    {"Transverse Cylindrical Equal Area", 0,
+     "Transverse_Cylindrical_Equal_Area", "tcea", nullptr, paramsObliqueStereo},
 
     {EPSG_NAME_METHOD_EQUAL_EARTH, EPSG_CODE_METHOD_EQUAL_EARTH, nullptr,
      "eqearth", nullptr, paramsLonNatOrigin},
