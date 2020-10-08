@@ -378,7 +378,8 @@ VerticalCRSPtr CRS::extractVerticalCRS() const {
  * a +towgs84 parameter or a WKT1:GDAL string with a TOWGS node.
  *
  * This method will fetch the GeographicCRS of this CRS and find a
- * transformation to EPSG:4326 using the domain of the validity of the main CRS.
+ * transformation to EPSG:4326 using the domain of the validity of the main CRS,
+ * and there's only one Helmert transformation.
  *
  * @return a CRS.
  */
@@ -400,23 +401,20 @@ CRSNNPtr CRS::createBoundCRSToWGS84IfPossible(
         }
     }
 
-    auto geodCRS = util::nn_dynamic_pointer_cast<GeodeticCRS>(thisAsCRS);
-    auto geogCRS = extractGeographicCRS();
-    auto hubCRS = util::nn_static_pointer_cast<CRS>(GeographicCRS::EPSG_4326);
-    if (geodCRS && !geogCRS) {
-        if (geodCRS->_isEquivalentTo(GeographicCRS::EPSG_4978.get(),
-                                     util::IComparable::Criterion::EQUIVALENT,
-                                     dbContext)) {
-            return thisAsCRS;
+    auto compoundCRS = dynamic_cast<const CompoundCRS *>(this);
+    if (compoundCRS) {
+        const auto &comps = compoundCRS->componentReferenceSystems();
+        if (comps.size() == 2) {
+            auto horiz = comps[0]->createBoundCRSToWGS84IfPossible(
+                dbContext, allowIntermediateCRSUse);
+            auto vert = comps[1]->createBoundCRSToWGS84IfPossible(
+                dbContext, allowIntermediateCRSUse);
+            if (horiz.get() != comps[0].get() || vert.get() != comps[1].get()) {
+                return CompoundCRS::create(createPropertyMap(this),
+                                           {horiz, vert});
+            }
         }
-        hubCRS = util::nn_static_pointer_cast<CRS>(GeodeticCRS::EPSG_4978);
-    } else if (!geogCRS ||
-               geogCRS->_isEquivalentTo(
-                   GeographicCRS::EPSG_4326.get(),
-                   util::IComparable::Criterion::EQUIVALENT, dbContext)) {
         return thisAsCRS;
-    } else {
-        geodCRS = geogCRS;
     }
 
     if (!dbContext) {
@@ -442,6 +440,83 @@ CRSNNPtr CRS::createBoundCRSToWGS84IfPossible(
     if (authorities.empty()) {
         authorities.emplace_back();
     }
+
+    // Vertical CRS ?
+    auto vertCRS = dynamic_cast<const VerticalCRS *>(this);
+    if (vertCRS) {
+        auto hubCRS =
+            util::nn_static_pointer_cast<CRS>(GeographicCRS::EPSG_4979);
+        for (const auto &authority : authorities) {
+            try {
+
+                auto authFactory = io::AuthorityFactory::create(
+                    NN_NO_CHECK(dbContext),
+                    authority == "any" ? std::string() : authority);
+                auto ctxt = operation::CoordinateOperationContext::create(
+                    authFactory, extent, 0.0);
+                ctxt->setAllowUseIntermediateCRS(allowIntermediateCRSUse);
+                // ctxt->setSpatialCriterion(
+                //    operation::CoordinateOperationContext::SpatialCriterion::PARTIAL_INTERSECTION);
+                auto list = operation::CoordinateOperationFactory::create()
+                                ->createOperations(hubCRS, thisAsCRS, ctxt);
+                CRSPtr candidateBoundCRS;
+                for (const auto &op : list) {
+                    auto transf = util::nn_dynamic_pointer_cast<
+                        operation::Transformation>(op);
+                    // Only keep transformations that use a known grid
+                    if (transf && !transf->hasBallparkTransformation()) {
+                        auto gridsNeeded = transf->gridsNeeded(dbContext, true);
+                        bool gridsKnown = !gridsNeeded.empty();
+                        for (const auto &gridDesc : gridsNeeded) {
+                            if (gridDesc.packageName.empty() &&
+                                !(!gridDesc.url.empty() &&
+                                  gridDesc.openLicense) &&
+                                !gridDesc.available) {
+                                gridsKnown = false;
+                                break;
+                            }
+                        }
+                        if (gridsKnown) {
+                            if (candidateBoundCRS) {
+                                candidateBoundCRS = nullptr;
+                                break;
+                            }
+                            candidateBoundCRS =
+                                BoundCRS::create(thisAsCRS, hubCRS,
+                                                 NN_NO_CHECK(transf))
+                                    .as_nullable();
+                        }
+                    }
+                }
+                if (candidateBoundCRS) {
+                    return NN_NO_CHECK(candidateBoundCRS);
+                }
+            } catch (const std::exception &) {
+            }
+        }
+        return thisAsCRS;
+    }
+
+    // Geodetic/geographic CRS ?
+    auto geodCRS = util::nn_dynamic_pointer_cast<GeodeticCRS>(thisAsCRS);
+    auto geogCRS = extractGeographicCRS();
+    auto hubCRS = util::nn_static_pointer_cast<CRS>(GeographicCRS::EPSG_4326);
+    if (geodCRS && !geogCRS) {
+        if (geodCRS->_isEquivalentTo(GeographicCRS::EPSG_4978.get(),
+                                     util::IComparable::Criterion::EQUIVALENT,
+                                     dbContext)) {
+            return thisAsCRS;
+        }
+        hubCRS = util::nn_static_pointer_cast<CRS>(GeodeticCRS::EPSG_4978);
+    } else if (!geogCRS ||
+               geogCRS->_isEquivalentTo(
+                   GeographicCRS::EPSG_4326.get(),
+                   util::IComparable::Criterion::EQUIVALENT, dbContext)) {
+        return thisAsCRS;
+    } else {
+        geodCRS = geogCRS;
+    }
+
     for (const auto &authority : authorities) {
         try {
 
@@ -456,6 +531,7 @@ CRSNNPtr CRS::createBoundCRSToWGS84IfPossible(
             auto list =
                 operation::CoordinateOperationFactory::create()
                     ->createOperations(NN_NO_CHECK(geodCRS), hubCRS, ctxt);
+            CRSPtr candidateBoundCRS;
             for (const auto &op : list) {
                 auto transf =
                     util::nn_dynamic_pointer_cast<operation::Transformation>(
@@ -466,8 +542,13 @@ CRSNNPtr CRS::createBoundCRSToWGS84IfPossible(
                     } catch (const std::exception &) {
                         continue;
                     }
-                    return util::nn_static_pointer_cast<CRS>(BoundCRS::create(
-                        thisAsCRS, hubCRS, NN_NO_CHECK(transf)));
+                    if (candidateBoundCRS) {
+                        candidateBoundCRS = nullptr;
+                        break;
+                    }
+                    candidateBoundCRS =
+                        BoundCRS::create(thisAsCRS, hubCRS, NN_NO_CHECK(transf))
+                            .as_nullable();
                 } else {
                     auto concatenated =
                         dynamic_cast<const operation::ConcatenatedOperation *>(
@@ -499,14 +580,22 @@ CRSNNPtr CRS::createBoundCRSToWGS84IfPossible(
                                     } catch (const std::exception &) {
                                         continue;
                                     }
-                                    return util::nn_static_pointer_cast<CRS>(
+                                    if (candidateBoundCRS) {
+                                        candidateBoundCRS = nullptr;
+                                        break;
+                                    }
+                                    candidateBoundCRS =
                                         BoundCRS::create(thisAsCRS, hubCRS,
-                                                         NN_NO_CHECK(transf)));
+                                                         NN_NO_CHECK(transf))
+                                            .as_nullable();
                                 }
                             }
                         }
                     }
                 }
+            }
+            if (candidateBoundCRS) {
+                return NN_NO_CHECK(candidateBoundCRS);
             }
         } catch (const std::exception &) {
         }

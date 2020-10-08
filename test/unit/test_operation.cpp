@@ -4599,7 +4599,7 @@ TEST(operation, geogCRS_to_geogCRS_context_NAD27_to_WGS84) {
         authFactory->createCoordinateReferenceSystem("4267"), // NAD27
         authFactory->createCoordinateReferenceSystem("4326"), // WGS84
         ctxt);
-    ASSERT_EQ(list.size(), 78U);
+    ASSERT_EQ(list.size(), 79U);
     EXPECT_EQ(list[0]->nameStr(),
               "NAD27 to WGS 84 (33)"); // 1.0 m, Canada - NAD27
     EXPECT_EQ(list[1]->nameStr(),
@@ -5050,7 +5050,7 @@ TEST(operation, geogCRS_to_geogCRS_context_concatenated_operation) {
         authFactory->createCoordinateReferenceSystem("4807"), // NTF(Paris)
         authFactory->createCoordinateReferenceSystem("4171"), // RGF93
         ctxt);
-    ASSERT_EQ(list.size(), 5U);
+    ASSERT_EQ(list.size(), 4U);
 
     EXPECT_EQ(list[0]->nameStr(), "NTF (Paris) to RGF93 (1)");
     EXPECT_EQ(list[0]->exportToPROJString(PROJStringFormatter::create().get()),
@@ -5158,7 +5158,7 @@ TEST(operation, geogCRS_to_geogCRS_CH1903_to_CH1903plus_context) {
         authFactory->createCoordinateReferenceSystem("4149"), // CH1903
         authFactory->createCoordinateReferenceSystem("4150"), // CH1903+
         ctxt);
-    ASSERT_TRUE(list.size() == 2U || list.size() == 3U);
+    ASSERT_TRUE(list.size() == 1U);
 
     EXPECT_EQ(list[0]->nameStr(), "CH1903 to CH1903+ (1)");
     EXPECT_EQ(list[0]->exportToPROJString(PROJStringFormatter::create().get()),
@@ -5167,25 +5167,6 @@ TEST(operation, geogCRS_to_geogCRS_CH1903_to_CH1903plus_context) {
               "+step +proj=hgridshift +grids=ch_swisstopo_CHENyx06a.tif "
               "+step +proj=unitconvert +xy_in=rad +xy_out=deg "
               "+step +proj=axisswap +order=2,1");
-
-    if (list.size() == 2U) {
-        // Grids not there
-        EXPECT_EQ(list[1]->nameStr(),
-                  "CH1903 to ETRS89 (1) + Inverse of CH1903+ to ETRS89 (1)");
-        EXPECT_EQ(
-            list[1]->exportToPROJString(PROJStringFormatter::create().get()),
-            "+proj=noop");
-    } else {
-        // Grids available
-        EXPECT_EQ(list[1]->nameStr(),
-                  "CH1903 to ETRS89 (2) + Inverse of CH1903+ to ETRS89 (1)");
-
-        EXPECT_EQ(list[2]->nameStr(),
-                  "CH1903 to ETRS89 (1) + Inverse of CH1903+ to ETRS89 (1)");
-        EXPECT_EQ(
-            list[2]->exportToPROJString(PROJStringFormatter::create().get()),
-            "+proj=noop");
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -6069,7 +6050,7 @@ TEST(operation, projCRS_to_projCRS_context_compatible_area) {
         authFactory->createCoordinateReferenceSystem(
             "2171"), // Pulkovo 42 Poland I
         ctxt);
-    ASSERT_EQ(list.size(), 1U);
+    ASSERT_EQ(list.size(), 2U);
     EXPECT_EQ(list[0]->nameStr(),
               "Inverse of UTM zone 34N + Inverse of Pulkovo 1942(58) to WGS 84 "
               "(1) + Poland zone I");
@@ -6088,7 +6069,7 @@ TEST(operation, projCRS_to_projCRS_context_compatible_area_bis) {
             "3844"), // Pulkovo 42 Stereo 70 (Romania)
         authFactory->createCoordinateReferenceSystem("32634"), // UTM 34
         ctxt);
-    ASSERT_EQ(list.size(), 1U);
+    ASSERT_EQ(list.size(), 3U);
     EXPECT_EQ(list[0]->nameStr(), "Inverse of Stereo 70 + "
                                   "Pulkovo 1942(58) to WGS 84 "
                                   "(19) + UTM zone 34N");
@@ -6107,7 +6088,7 @@ TEST(operation, projCRS_to_projCRS_context_one_incompatible_area) {
         authFactory->createCoordinateReferenceSystem(
             "2171"), // Pulkovo 42 Poland I
         ctxt);
-    ASSERT_EQ(list.size(), 1U);
+    ASSERT_EQ(list.size(), 2U);
     EXPECT_EQ(list[0]->nameStr(),
               "Inverse of UTM zone 31N + Inverse of Pulkovo 1942(58) to WGS 84 "
               "(1) + Poland zone I");
@@ -6229,6 +6210,24 @@ TEST(operation, projCRS_to_projCRS_through_geog3D) {
               "+step +proj=pop +v_3 "
               "+step +proj=tmerc +lat_0=0 +lon_0=-84 +k=0.9999 +x_0=500000 "
               "+y_0=0 +ellps=GRS80");
+}
+
+// ---------------------------------------------------------------------------
+
+TEST(operation, transform_from_amersfoort_rd_new_to_epsg_4326) {
+    auto authFactory =
+        AuthorityFactory::create(DatabaseContext::create(), "EPSG");
+    auto ctxt = CoordinateOperationContext::create(authFactory, nullptr, 0.0);
+    auto list = CoordinateOperationFactory::create()->createOperations(
+        authFactory->createCoordinateReferenceSystem("28992"),
+        authFactory->createCoordinateReferenceSystem("4326"), ctxt);
+    ASSERT_EQ(list.size(), 2U);
+    // The order matters: "Amersfoort to WGS 84 (4)" replaces "Amersfoort to WGS
+    // 84 (3)"
+    EXPECT_EQ(list[0]->nameStr(),
+              "Inverse of RD New + Amersfoort to WGS 84 (4)");
+    EXPECT_EQ(list[1]->nameStr(),
+              "Inverse of RD New + Amersfoort to WGS 84 (3)");
 }
 
 // ---------------------------------------------------------------------------
@@ -6802,7 +6801,7 @@ TEST(operation, nadgrids_with_pm) {
     dst = authFactory->createCoordinateReferenceSystem("4258");
     list = CoordinateOperationFactory::create()->createOperations(
         NN_NO_CHECK(src), dst, ctxt);
-    ASSERT_EQ(list.size(), 1U);
+    ASSERT_GE(list.size(), 1U);
     EXPECT_EQ(list[0]->exportToPROJString(PROJStringFormatter::create().get()),
               "+proj=pipeline "
               "+step +inv +proj=tmerc +lat_0=39.6666666666667 +lon_0=1 "
@@ -6820,7 +6819,7 @@ TEST(operation, nadgrids_with_pm) {
     ASSERT_TRUE(crsFromWkt);
     list = CoordinateOperationFactory::create()->createOperations(
         NN_NO_CHECK(crsFromWkt), dst, ctxt);
-    ASSERT_EQ(list.size(), 1U);
+    ASSERT_GE(list.size(), 1U);
     EXPECT_EQ(list[0]->exportToPROJString(PROJStringFormatter::create().get()),
               "+proj=pipeline "
               "+step +inv +proj=tmerc +lat_0=39.6666666666667 +lon_0=1 "
@@ -7618,6 +7617,97 @@ TEST(
               "+step +proj=unitconvert +xy_in=rad +z_in=m "
               "+xy_out=deg +z_out=us-ft "
               "+step +proj=axisswap +order=2,1");
+}
+
+// ---------------------------------------------------------------------------
+
+TEST(operation,
+     compoundCRS_with_boundGeogCRS_and_geoid_to_geodCRS_NAD2011_ctxt) {
+
+    auto dbContext = DatabaseContext::create();
+
+    const char *wktSrc =
+        "COMPD_CS[\"NAD83 / California zone 5 (ftUS) + "
+        "NAVD88 height - Geoid12B (ftUS)\","
+        "   PROJCS[\"NAD83 / California zone 5 (ftUS)\","
+        "       GEOGCS[\"NAD83\","
+        "           DATUM[\"North_American_Datum_1983\","
+        "               SPHEROID[\"GRS 1980\",6378137,298.257222101,"
+        "                   AUTHORITY[\"EPSG\",\"7019\"]],"
+        "               TOWGS84[0,0,0,0,0,0,0],"
+        "               AUTHORITY[\"EPSG\",\"6269\"]],"
+        "           PRIMEM[\"Greenwich\",0,"
+        "               AUTHORITY[\"EPSG\",\"8901\"]],"
+        "           UNIT[\"degree\",0.0174532925199433,"
+        "               AUTHORITY[\"EPSG\",\"9122\"]],"
+        "           AUTHORITY[\"EPSG\",\"4269\"]],"
+        "       PROJECTION[\"Lambert_Conformal_Conic_2SP\"],"
+        "       PARAMETER[\"standard_parallel_1\",35.46666666666667],"
+        "       PARAMETER[\"standard_parallel_2\",34.03333333333333],"
+        "       PARAMETER[\"latitude_of_origin\",33.5],"
+        "       PARAMETER[\"central_meridian\",-118],"
+        "       PARAMETER[\"false_easting\",6561666.667],"
+        "       PARAMETER[\"false_northing\",1640416.667],"
+        "       UNIT[\"US survey foot\",0.3048006096012192,"
+        "           AUTHORITY[\"EPSG\",\"9003\"]],"
+        "       AXIS[\"X\",EAST],"
+        "       AXIS[\"Y\",NORTH],"
+        "       AUTHORITY[\"EPSG\",\"2229\"]],"
+        "VERT_CS[\"NAVD88 height - Geoid12B (ftUS)\","
+        "   VERT_DATUM[\"North American Vertical Datum 1988\",2005,"
+        "       AUTHORITY[\"EPSG\",\"5103\"]],"
+        "   UNIT[\"US survey foot\",0.3048006096012192,"
+        "       AUTHORITY[\"EPSG\",\"9003\"]],"
+        "   AXIS[\"Gravity-related height\",UP],"
+        "   AUTHORITY[\"EPSG\",\"6360\"]]]";
+    auto objSrc =
+        WKTParser().attachDatabaseContext(dbContext).createFromWKT(wktSrc);
+    auto srcCRS = nn_dynamic_pointer_cast<CompoundCRS>(objSrc);
+    ASSERT_TRUE(srcCRS != nullptr);
+
+    auto authFactoryEPSG = AuthorityFactory::create(dbContext, "EPSG");
+    // NAD83(2011) geocentric
+    auto dstCRS = authFactoryEPSG->createCoordinateReferenceSystem("6317");
+
+    auto authFactory = AuthorityFactory::create(dbContext, std::string());
+    auto ctxt = CoordinateOperationContext::create(authFactory, nullptr, 0.0);
+    ctxt->setGridAvailabilityUse(
+        CoordinateOperationContext::GridAvailabilityUse::
+            IGNORE_GRID_AVAILABILITY);
+    ctxt->setSpatialCriterion(
+        CoordinateOperationContext::SpatialCriterion::PARTIAL_INTERSECTION);
+    auto list = CoordinateOperationFactory::create()->createOperations(
+        NN_NO_CHECK(srcCRS), dstCRS, ctxt);
+    bool found = false;
+    for (const auto &op : list) {
+        if (op->nameStr() ==
+            "Inverse of unnamed + "
+            "Transformation from NAD83 to WGS84 + "
+            "Ballpark geographic offset from WGS 84 to NAD83(2011) + "
+            "Transformation from NAVD88 height (ftUS) to NAVD88 height + "
+            "Inverse of NAD83(2011) to NAVD88 height (1) + "
+            "Conversion from NAD83(2011) (geog3D) to NAD83(2011) "
+            "(geocentric)") {
+            found = true;
+            EXPECT_EQ(
+                op->exportToPROJString(PROJStringFormatter::create().get()),
+                "+proj=pipeline "
+                "+step +proj=unitconvert +xy_in=us-ft +xy_out=m "
+                "+step +inv +proj=lcc +lat_0=33.5 +lon_0=-118 "
+                "+lat_1=35.4666666666667 +lat_2=34.0333333333333 "
+                "+x_0=2000000.0001016 +y_0=500000.0001016 +ellps=GRS80 "
+                "+step +proj=unitconvert +z_in=us-ft +z_out=m "
+                "+step +proj=vgridshift +grids=us_noaa_g2012bu0.tif "
+                "+multiplier=1 "
+                "+step +proj=cart +ellps=GRS80");
+        }
+    }
+    EXPECT_TRUE(found);
+    if (!found) {
+        for (const auto &op : list) {
+            std::cerr << op->nameStr() << std::endl;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
