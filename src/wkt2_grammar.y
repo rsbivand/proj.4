@@ -209,7 +209,7 @@ input:
     map_projection
 
 datum:
-    geodetic_reference_frame_without_pm | datum_ensemble |
+    geodetic_reference_frame_with_opt_pm | datum_ensemble |
     vertical_reference_frame | engineering_datum | parametric_datum |
     temporal_datum
 
@@ -967,6 +967,10 @@ irm_longitude_opt_separator_identifier_list:
 
 // Geodetic reference frame
 
+geodetic_reference_frame_with_opt_pm:
+    geodetic_reference_frame_without_pm
+  | geodetic_reference_frame_without_pm wkt_separator prime_meridian
+
 geodetic_reference_frame_without_pm: geodetic_reference_frame_keyword
                           left_delimiter datum_name wkt_separator ellipsoid
                           opt_separator_datum_anchor_identifier_list
@@ -1069,6 +1073,7 @@ map_projection_parameter: parameter_keyword left_delimiter parameter_name
                           right_delimiter
 
 opt_separator_param_unit_identifier_list:
+  | wkt_separator identifier opt_separator_identifier_list
   | wkt_separator map_projection_parameter_unit opt_separator_identifier_list
 
 parameter_keyword: T_PARAMETER
@@ -1597,12 +1602,12 @@ abridged_coordinate_transformation_next:
 
 abridged_coordinate_transformation_end:
                                     wkt_separator operation_method
-                                    wkt_separator
-                                    abridged_parameter_or_parameter_file
+// At least one parameter required by WKT2. But relax that to allow things like METHOD["PROJ-based operation method: +proj=...."]
+//                                  wkt_separator abridged_parameter_or_parameter_file
                                     opt_end_abridged_coordinate_transformation
                                     right_delimiter
 
-abridged_parameter_or_parameter_file: abridged_transformation_parameter | operation_parameter_file
+//abridged_parameter_or_parameter_file: abridged_transformation_parameter | operation_parameter_file
 
 opt_end_abridged_coordinate_transformation:
    | wkt_separator abridged_transformation_parameter opt_end_abridged_coordinate_transformation

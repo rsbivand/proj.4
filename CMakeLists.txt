@@ -110,9 +110,9 @@ message(STATUS "Configuring PROJ:")
 #PROJ version information
 ################################################################################
 include(ProjVersion)
-proj_version(MAJOR 7 MINOR 2 PATCH 0)
-set(PROJ_API_VERSION "20")
-set(PROJ_BUILD_VERSION "20.0.1")
+proj_version(MAJOR 8 MINOR 0 PATCH 0)
+set(PROJ_API_VERSION "19")
+set(PROJ_BUILD_VERSION "21.0.2")
 
 ################################################################################
 # Build features and variants
@@ -174,6 +174,13 @@ if(ENABLE_CURL)
   else()
     message(SEND_ERROR "curl dependency not found!")
   endif()
+endif()
+
+################################################################################
+
+option(PROJ_LIB_ENV_VAR_TRIED_LAST "Whether the PROJ_LIB environment variable should be tried after the hardcoded location" OFF)
+if(PROJ_LIB_ENV_VAR_TRIED_LAST)
+    add_definitions(-DPROJ_LIB_ENV_VAR_TRIED_LAST)
 endif()
 
 ################################################################################
@@ -252,12 +259,6 @@ set(CMAKECONFIGDIR "${DEFAULT_CMAKEDIR}"
 ################################################################################
 include(CTest)
 
-# Support older option, to be removed by PROJ 8.0
-if(DEFINED PROJ_TESTS)
-  message(DEPRECATION "PROJ_TESTS has been replaced with BUILD_TESTING")
-  set(BUILD_TESTING ${PROJ_TESTS})
-endif()
-
 if(BUILD_TESTING)
   include(ProjTest)
 else()
@@ -277,3 +278,7 @@ add_subdirectory(cmake)
 if(BUILD_TESTING)
   add_subdirectory(test)
 endif()
+
+set(docfiles COPYING NEWS AUTHORS)
+install(FILES ${docfiles}
+        DESTINATION "${DOCDIR}")

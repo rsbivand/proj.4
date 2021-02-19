@@ -119,8 +119,8 @@
 
 #include <stddef.h>  /* For size_t */
 
-#ifdef PROJ_API_H
-#error proj.h must be included before proj_api.h
+#ifdef ACCEPT_USE_OF_DEPRECATED_PROJ_API_H
+  #error "The proj_api.h header has been removed from PROJ with version 8.0.0"
 #endif
 
 #ifdef PROJ_RENAME_SYMBOLS
@@ -170,8 +170,8 @@ extern "C" {
 #endif
 
 /* The version numbers should be updated with every release! **/
-#define PROJ_VERSION_MAJOR 7
-#define PROJ_VERSION_MINOR 2
+#define PROJ_VERSION_MAJOR 8
+#define PROJ_VERSION_MINOR 0
 #define PROJ_VERSION_PATCH 0
 
 extern char const PROJ_DLL pj_release[]; /* global release id string */
@@ -340,9 +340,9 @@ typedef enum PJ_LOG_LEVEL {
 typedef void (*PJ_LOG_FUNCTION)(void *, int, const char *);
 
 
-/* The context type - properly namespaced synonym for projCtx */
-struct projCtx_t;
-typedef struct projCtx_t PJ_CONTEXT;
+/* The context type - properly namespaced synonym for pj_ctx */
+struct pj_ctx;
+typedef struct pj_ctx PJ_CONTEXT;
 
 /* A P I */
 
@@ -361,6 +361,7 @@ typedef struct projCtx_t PJ_CONTEXT;
 #endif
 PJ_CONTEXT PROJ_DLL *proj_context_create (void);
 PJ_CONTEXT PROJ_DLL *proj_context_destroy (PJ_CONTEXT *ctx);
+PJ_CONTEXT PROJ_DLL *proj_context_clone (PJ_CONTEXT *ctx);
 
 /** Callback to resolve a filename to a full path */
 typedef const char* (*proj_file_finder) (PJ_CONTEXT *ctx, const char*, void* user_data);
@@ -609,6 +610,33 @@ double PROJ_DLL proj_xyz_dist (PJ_COORD a, PJ_COORD b);
 /* Geodesic distance (in meter) + fwd and rev azimuth between two points on the ellipsoid */
 PJ_COORD PROJ_DLL proj_geod (const PJ *P, PJ_COORD a, PJ_COORD b);
 
+/* PROJ error codes */
+
+/** Error codes typically related to coordinate operation initalization
+ * Note: some of them can also be emitted during coordinate transformation,
+ * like PROJ_ERR_INVALID_OP_FILE_NOT_FOUND_OR_INVALID in case the resource loading
+ * is differed until it is really needed.
+ */
+#define PROJ_ERR_INVALID_OP                           1024                        /* other/unspecified error related to coordinate operation initialization */
+#define PROJ_ERR_INVALID_OP_WRONG_SYNTAX              (PROJ_ERR_INVALID_OP+1)     /* invalid pipeline structure, missing +proj argument, etc */
+#define PROJ_ERR_INVALID_OP_MISSING_ARG               (PROJ_ERR_INVALID_OP+2)     /* missing required operation parameter */
+#define PROJ_ERR_INVALID_OP_ILLEGAL_ARG_VALUE         (PROJ_ERR_INVALID_OP+3)     /* one of the operation parameter has an illegal value */
+#define PROJ_ERR_INVALID_OP_MUTUALLY_EXCLUSIVE_ARGS   (PROJ_ERR_INVALID_OP+4)     /* mutually exclusive arguments */
+#define PROJ_ERR_INVALID_OP_FILE_NOT_FOUND_OR_INVALID (PROJ_ERR_INVALID_OP+5)     /* file not found (particular case of PROJ_ERR_INVALID_OP_ILLEGAL_ARG_VALUE) */
+
+/** Error codes related to transformation on a specific coordinate */
+#define PROJ_ERR_COORD_TRANSFM                           2048                           /* other error related to coordinate transformation */
+#define PROJ_ERR_COORD_TRANSFM_INVALID_COORD             (PROJ_ERR_COORD_TRANSFM+1)     /* for e.g lat > 90deg */
+#define PROJ_ERR_COORD_TRANSFM_OUTSIDE_PROJECTION_DOMAIN (PROJ_ERR_COORD_TRANSFM+2)     /* coordinate is outside of the projection domain. e.g approximate mercator with |longitude - lon_0| > 90deg, or iterative convergence method failed */
+#define PROJ_ERR_COORD_TRANSFM_NO_OPERATION              (PROJ_ERR_COORD_TRANSFM+3)     /* no operation found, e.g if no match the required accuracy, or if ballpark transformations were asked to not be used and they would be only such candidate */
+#define PROJ_ERR_COORD_TRANSFM_OUTSIDE_GRID              (PROJ_ERR_COORD_TRANSFM+4)     /* point to transform falls outside grid or subgrid */
+#define PROJ_ERR_COORD_TRANSFM_GRID_AT_NODATA            (PROJ_ERR_COORD_TRANSFM+5)     /* point to transform falls in a grid cell that evaluates to nodata */
+
+/** Other type of errors */
+#define PROJ_ERR_OTHER                                   4096
+#define PROJ_ERR_OTHER_API_MISUSE                        (PROJ_ERR_OTHER+1)             /* error related to a misuse of PROJ API */
+#define PROJ_ERR_OTHER_NO_INVERSE_OP                     (PROJ_ERR_OTHER+2)             /* no inverse method available */
+#define PROJ_ERR_OTHER_NETWORK_ERROR                     (PROJ_ERR_OTHER+3)             /* failure when accessing a network resource */
 
 /* Set or read error level */
 int  PROJ_DLL proj_context_errno (PJ_CONTEXT *ctx);
@@ -616,7 +644,8 @@ int  PROJ_DLL proj_errno (const PJ *P);
 int  PROJ_DLL proj_errno_set (const PJ *P, int err);
 int  PROJ_DLL proj_errno_reset (const PJ *P);
 int  PROJ_DLL proj_errno_restore (const PJ *P, int err);
-const char PROJ_DLL * proj_errno_string (int err);
+const char PROJ_DLL * proj_errno_string (int err); /* deprecated. use proj_context_errno_string() */
+const char PROJ_DLL * proj_context_errno_string(PJ_CONTEXT* ctx, int err);
 
 PJ_LOG_LEVEL PROJ_DLL proj_log_level (PJ_CONTEXT *ctx, PJ_LOG_LEVEL log_level);
 void PROJ_DLL proj_log_func (PJ_CONTEXT *ctx, void *app_data, PJ_LOG_FUNCTION logf);
@@ -693,7 +722,8 @@ typedef enum
     PJ_CATEGORY_PRIME_MERIDIAN,
     PJ_CATEGORY_DATUM,
     PJ_CATEGORY_CRS,
-    PJ_CATEGORY_COORDINATE_OPERATION
+    PJ_CATEGORY_COORDINATE_OPERATION,
+    PJ_CATEGORY_DATUM_ENSEMBLE
 } PJ_CATEGORY;
 
 /** \brief Object type. */
@@ -1241,6 +1271,8 @@ int PROJ_DLL proj_get_suggested_operation(PJ_CONTEXT *ctx,
 
 /* ------------------------------------------------------------------------- */
 
+int PROJ_DLL proj_crs_is_derived(PJ_CONTEXT *ctx, const PJ *crs);
+
 PJ PROJ_DLL *proj_crs_get_geodetic_crs(PJ_CONTEXT *ctx, const PJ *crs);
 
 PJ PROJ_DLL *proj_crs_get_horizontal_datum(PJ_CONTEXT *ctx, const PJ *crs);
@@ -1248,6 +1280,23 @@ PJ PROJ_DLL *proj_crs_get_horizontal_datum(PJ_CONTEXT *ctx, const PJ *crs);
 PJ PROJ_DLL *proj_crs_get_sub_crs(PJ_CONTEXT *ctx, const PJ *crs, int index);
 
 PJ PROJ_DLL *proj_crs_get_datum(PJ_CONTEXT *ctx, const PJ *crs);
+
+PJ PROJ_DLL *proj_crs_get_datum_ensemble(PJ_CONTEXT *ctx, const PJ *crs);
+
+PJ PROJ_DLL *proj_crs_get_datum_forced(PJ_CONTEXT *ctx, const PJ *crs);
+
+int PROJ_DLL proj_datum_ensemble_get_member_count(PJ_CONTEXT *ctx,
+                                                  const PJ *datum_ensemble);
+
+double PROJ_DLL proj_datum_ensemble_get_accuracy(PJ_CONTEXT *ctx,
+                                                 const PJ *datum_ensemble);
+
+PJ PROJ_DLL *proj_datum_ensemble_get_member(PJ_CONTEXT *ctx,
+                                            const PJ *datum_ensemble,
+                                            int member_index);
+
+double PROJ_DLL proj_dynamic_datum_get_frame_reference_epoch(PJ_CONTEXT *ctx,
+                                                     const PJ *datum);
 
 PJ PROJ_DLL *proj_crs_get_coordinate_system(PJ_CONTEXT *ctx, const PJ *crs);
 

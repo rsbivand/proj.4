@@ -5,7 +5,7 @@ Computation of coordinate operations between two CRS
 ================================================================================
 
 :Author: Even Rouault
-:Last Updated: 2020-01-02
+:Last Updated: 2021-02-10
 
 Introduction
 ------------
@@ -27,7 +27,7 @@ This document is meant as a plain text explanation of the code for developers,
 but also as a in-depth examination of what happens under the hood for curious PROJ
 users. It is important to keep in mind that it is not meant to be the ultimate
 source of truth of how coordinate operations should be computed. There are clearly
-implementation choices and compromises that can be questionned.
+implementation choices and compromises that can be questioned.
 
 Let us start with an example to research operations between the NAD27 and NAD83
 geographic CRS:
@@ -50,7 +50,7 @@ geographic CRS:
 
 The algorithm involves many cases, so we will progress in the explanation from
 the most simple case to more complex ones. We document here the working of this
-algorithm as implemented in PROJ 6.3.0.
+algorithm as implemented in PROJ 8.0.0.
 The results of some examples might also be quite sensitive to the content of the
 PROJ database and the PROJ version used.
 
@@ -123,7 +123,7 @@ must be retained or discarded:
 
 The sorting algorithm determines the order of relevance of the operations we got.
 A comparison function compares pair of operations to determine which of the
-two is the most releavant. This is implemented by the :cpp:func:`operator ()`
+two is the most relevant. This is implemented by the :cpp:func:`operator ()`
 method of the SortFunction structure.
 When comparing two operations, the following criteria are used. The tests are
 performed in the order they are listed below:
@@ -149,11 +149,12 @@ performed in the order they are listed below:
 10. in case of same accuracy, consider as more relevant an operation that does
     not use grids (operations that use only parameters will be faster)
 11. consider as more relevant an operation that involves less transformation steps
+    (transformation steps considered are the ones listed in the WKT output, not PROJ pipeline steps)
 12. and for completeness, if two operations are comparable given all the above criteria,
     consider as more relevant the one which has the shorter name, and if they
-    have the same length, consider as more relevant the one whose name comes first in
-    lexicographic order (obviously completely arbitrary, but a sorting
-    algorithm must be able to compare all entries)
+    have the same length, consider as more relevant the one whose name comes last in
+    lexicographic order (e.g. "FOO to BAR (3)" will have higher precedence than
+    "FOO to BAR (2)")
 
 Geodetic/geographic CRS to Geodetic/geographic CRS, without known identifiers
 -----------------------------------------------------------------------------
@@ -163,7 +164,7 @@ In a number of situations, the source and/or target CRS do not have an identifie
 The first step is to try to find in the ``proj.db`` a CRS of the same nature of
 the CRS to identify and whose name exactly matches the one provided to the
 :c:func:`createOperations` method. If there is exactly one match and that the CRS are
-"computationnaly" equivalent, then use the code of the CRS for further computations.
+"computationally" equivalent, then use the code of the CRS for further computations.
 
 If this search did not succeed, or if the previous case with known CRS identifiers
 did not result in matches in the database, the search will be based on the
@@ -195,7 +196,7 @@ one can define a geographic 2D CRS (latitude, longitude), a geographic 3D crs
 case, the EPSG dataset has also included two extra definitions corresponding to a
 longitude, latitude, [ellipsoidal height] coordinate system, as found in the official
 French IGNF registry. This IGNF registry has also definitions for a geographic 2D
-CRS (with an extra subtelty with an entry using decimal degree as unit and another
+CRS (with an extra subtlety with an entry using decimal degree as unit and another
 one degree-minute-second), geographic 3D and geocentric.
 
 For EPSG:6258, there are 7 matching (non-deprecated) geodetic CRSs: 

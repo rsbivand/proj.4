@@ -72,6 +72,7 @@ struct OutputOptions {
     bool singleLine = false;
     bool strict = true;
     bool ballparkAllowed = true;
+    bool allowEllipsoidalHeightAsVerticalCRS = false;
 };
 } // anonymous namespace
 
@@ -79,7 +80,8 @@ struct OutputOptions {
 
 static void usage() {
     std::cerr
-        << "usage: projinfo [-o formats] [-k crs|operation|datum|ellipsoid] "
+        << "usage: projinfo [-o formats] "
+           "[-k crs|operation|datum|ensemble|ellipsoid] "
            "[--summary] [-q]"
         << std::endl
         << "                ([--area name_or_code] | "
@@ -93,7 +95,11 @@ static void usage() {
         << std::endl
         << "                [--pivot-crs always|if_no_direct_transformation|"
         << "never|{auth:code[,auth:code]*}]" << std::endl
-        << "                [--show-superseded] [--hide-ballpark]" << std::endl
+        << "                [--show-superseded] [--hide-ballpark] "
+           "[--accuracy {accuracy}]"
+        << std::endl
+        << "                [--allow-ellipsoidal-height-as-vertical-crs]"
+        << std::endl
         << "                [--boundcrs-to-wgs84]" << std::endl
         << "                [--main-db-path path] [--aux-db-path path]*"
         << std::endl
@@ -184,11 +190,11 @@ static BaseObjectNNPtr buildObject(
             auto urn = "urn:ogc:def:coordinateOperation:" + tokens[0] + "::" +
                        tokens[1];
             obj = createFromUserInput(urn, dbContext).as_nullable();
-        } else if (kind == "ellipsoid" && tokens.size() == 2) {
-            auto urn = "urn:ogc:def:ellipsoid:" + tokens[0] + "::" + tokens[1];
-            obj = createFromUserInput(urn, dbContext).as_nullable();
-        } else if (kind == "datum" && tokens.size() == 2) {
-            auto urn = "urn:ogc:def:datum:" + tokens[0] + "::" + tokens[1];
+        } else if ((kind == "ellipsoid" || kind == "datum" ||
+                    kind == "ensemble") &&
+                   tokens.size() == 2) {
+            auto urn =
+                "urn:ogc:def:" + kind + ":" + tokens[0] + "::" + tokens[1];
             obj = createFromUserInput(urn, dbContext).as_nullable();
         } else {
             // Convenience to be able to use C escaped strings...
@@ -222,6 +228,9 @@ static BaseObjectNNPtr buildObject(
                         AuthorityFactory::ObjectType::ELLIPSOID);
                 else if (kind == "datum")
                     allowedTypes.push_back(AuthorityFactory::ObjectType::DATUM);
+                else if (kind == "ensemble")
+                    allowedTypes.push_back(
+                        AuthorityFactory::ObjectType::DATUM_ENSEMBLE);
                 constexpr size_t limitResultCount = 10;
                 auto factory = AuthorityFactory::create(NN_NO_CHECK(dbContext),
                                                         std::string());
@@ -350,11 +359,11 @@ static void outputObject(
                     objToExport = projStringExportable;
                 }
 
-                std::cout << objToExport->exportToPROJString(
-                                 PROJStringFormatter::create(
-                                     PROJStringFormatter::Convention::PROJ_5,
-                                     dbContext)
-                                     .get())
+                auto formatter = PROJStringFormatter::create(
+                    PROJStringFormatter::Convention::PROJ_5, dbContext);
+                formatter->setMultiLine(!outputOpt.singleLine &&
+                                        crs == nullptr);
+                std::cout << objToExport->exportToPROJString(formatter.get())
                           << std::endl;
             } catch (const std::exception &e) {
                 std::cerr << "Error when exporting to PROJ string: " << e.what()
@@ -376,9 +385,7 @@ static void outputObject(
                 }
                 auto formatter =
                     WKTFormatter::create(WKTFormatter::Convention::WKT2_2015);
-                if (outputOpt.singleLine) {
-                    formatter->setMultiLine(false);
-                }
+                formatter->setMultiLine(!outputOpt.singleLine);
                 formatter->setStrict(outputOpt.strict);
                 auto wkt = wktExportable->exportToWKT(formatter.get());
                 if (outputOpt.c_ify) {
@@ -485,6 +492,8 @@ static void outputObject(
                     formatter->setMultiLine(false);
                 }
                 formatter->setStrict(outputOpt.strict);
+                formatter->setAllowEllipsoidalHeightAsVerticalCRS(
+                    outputOpt.allowEllipsoidalHeightAsVerticalCRS);
                 auto wkt = wktExportable->exportToWKT(formatter.get());
                 if (outputOpt.c_ify) {
                     wkt = c_ify_string(wkt);
@@ -665,8 +674,8 @@ static void outputOperations(
     CoordinateOperationContext::IntermediateCRSUse allowUseIntermediateCRS,
     const std::vector<std::pair<std::string, std::string>> &pivots,
     const std::string &authority, bool usePROJGridAlternatives,
-    bool showSuperseded, bool promoteTo3D, const OutputOptions &outputOpt,
-    bool summary) {
+    bool showSuperseded, bool promoteTo3D, double minimumAccuracy,
+    const OutputOptions &outputOpt, bool summary) {
     auto sourceObj =
         buildObject(dbContext, sourceCRSStr, "crs", "source CRS", false,
                     CoordinateOperationContext::IntermediateCRSUse::NEVER,
@@ -691,6 +700,7 @@ static void outputOperations(
 
     std::vector<CoordinateOperationNNPtr> list;
     size_t spatialCriterionPartialIntersectionResultCount = 0;
+    bool spatialCriterionPartialIntersectionMoreRelevant = false;
     try {
         auto authFactory =
             dbContext
@@ -707,6 +717,9 @@ static void outputOperations(
         ctxt->setUsePROJAlternativeGridNames(usePROJGridAlternatives);
         ctxt->setDiscardSuperseded(!showSuperseded);
         ctxt->setAllowBallparkTransformations(outputOpt.ballparkAllowed);
+        if (minimumAccuracy >= 0) {
+            ctxt->setDesiredAccuracy(minimumAccuracy);
+        }
         list = CoordinateOperationFactory::create()->createOperations(
             nnSourceCRS, nnTargetCRS, ctxt);
         if (!spatialCriterionExplicitlySpecified &&
@@ -716,10 +729,15 @@ static void outputOperations(
                 ctxt->setSpatialCriterion(
                     CoordinateOperationContext::SpatialCriterion::
                         PARTIAL_INTERSECTION);
-                spatialCriterionPartialIntersectionResultCount =
-                    CoordinateOperationFactory::create()
-                        ->createOperations(nnSourceCRS, nnTargetCRS, ctxt)
-                        .size();
+                auto list2 =
+                    CoordinateOperationFactory::create()->createOperations(
+                        nnSourceCRS, nnTargetCRS, ctxt);
+                spatialCriterionPartialIntersectionResultCount = list2.size();
+                if (spatialCriterionPartialIntersectionResultCount == 1 &&
+                    list.size() == 1 &&
+                    list2[0]->nameStr() != list[0]->nameStr()) {
+                    spatialCriterionPartialIntersectionMoreRelevant = true;
+                }
             } catch (const std::exception &) {
             }
         }
@@ -737,6 +755,10 @@ static void outputOperations(
         std::cout << "Note: using '--spatial-test intersects' would bring "
                      "more results ("
                   << spatialCriterionPartialIntersectionResultCount << ")"
+                  << std::endl;
+    } else if (spatialCriterionPartialIntersectionMoreRelevant) {
+        std::cout << "Note: using '--spatial-test intersects' would bring "
+                     "more relevant results."
                   << std::endl;
     }
     if (summary) {
@@ -802,6 +824,7 @@ int main(int argc, char **argv) {
     bool identify = false;
     bool showSuperseded = false;
     bool promoteTo3D = false;
+    double minimumAccuracy = -1;
 
     for (int i = 1; i < argc; i++) {
         std::string arg(argv[i]);
@@ -917,6 +940,9 @@ int main(int argc, char **argv) {
                           << ", " << e.what() << std::endl;
                 usage();
             }
+        } else if (arg == "--accuracy" && i + 1 < argc) {
+            i++;
+            minimumAccuracy = c_locale_stod(argv[i]);
         } else if (arg == "--area" && i + 1 < argc) {
             i++;
             area = argv[i];
@@ -931,6 +957,8 @@ int main(int argc, char **argv) {
                 objectKind = "ellipsoid";
             } else if (ci_equal(kind, "datum")) {
                 objectKind = "datum";
+            } else if (ci_equal(kind, "ensemble")) {
+                objectKind = "ensemble";
             } else {
                 std::cerr << "Unrecognized value for option -k: " << kind
                           << std::endl;
@@ -1056,6 +1084,8 @@ int main(int argc, char **argv) {
             showSuperseded = true;
         } else if (arg == "--lax") {
             outputOpt.strict = false;
+        } else if (arg == "--allow-ellipsoidal-height-as-vertical-crs") {
+            outputOpt.allowEllipsoidalHeightAsVerticalCRS = true;
         } else if (arg == "--hide-ballpark") {
             outputOpt.ballparkAllowed = false;
         } else if (ci_equal(arg, "--3d")) {
@@ -1147,8 +1177,10 @@ int main(int argc, char **argv) {
     }
 
     if (outputOpt.quiet &&
-        (outputOpt.PROJ5 + outputOpt.WKT2_2019 + outputOpt.WKT2_2015 +
-         outputOpt.WKT1_GDAL + outputOpt.PROJJSON) != 1) {
+        (outputOpt.PROJ5 + outputOpt.WKT2_2019 +
+         outputOpt.WKT2_2019_SIMPLIFIED + outputOpt.WKT2_2015 +
+         outputOpt.WKT2_2015_SIMPLIFIED + outputOpt.WKT1_GDAL +
+         outputOpt.WKT1_ESRI + outputOpt.PROJJSON) != 1) {
         std::cerr << "-q can only be used with a single output format"
                   << std::endl;
         usage();
@@ -1198,26 +1230,48 @@ int main(int argc, char **argv) {
                                 std::cout << *ids[0]->codeSpace() << ":"
                                           << ids[0]->code() << ": "
                                           << pair.second << " %" << std::endl;
-                            } else {
-                                auto boundCRS = dynamic_cast<BoundCRS *>(
-                                    identifiedCRS.get());
-                                if (boundCRS &&
-                                    !boundCRS->baseCRS()
-                                         ->identifiers()
-                                         .empty()) {
-                                    const auto &idsBase =
-                                        boundCRS->baseCRS()->identifiers();
-                                    std::cout << "BoundCRS of "
-                                              << *idsBase[0]->codeSpace() << ":"
-                                              << idsBase[0]->code() << ": "
-                                              << pair.second << " %"
-                                              << std::endl;
-                                } else {
-                                    std::cout
-                                        << "un-identifier CRS: " << pair.second
-                                        << " %" << std::endl;
+                                continue;
+                            }
+
+                            auto boundCRS =
+                                dynamic_cast<BoundCRS *>(identifiedCRS.get());
+                            if (boundCRS &&
+                                !boundCRS->baseCRS()->identifiers().empty()) {
+                                const auto &idsBase =
+                                    boundCRS->baseCRS()->identifiers();
+                                std::cout << "BoundCRS of "
+                                          << *idsBase[0]->codeSpace() << ":"
+                                          << idsBase[0]->code() << ": "
+                                          << pair.second << " %" << std::endl;
+                                continue;
+                            }
+
+                            auto compoundCRS = dynamic_cast<CompoundCRS *>(
+                                identifiedCRS.get());
+                            if (compoundCRS) {
+                                const auto &components =
+                                    compoundCRS->componentReferenceSystems();
+                                if (components.size() == 2 &&
+                                    !components[0]->identifiers().empty() &&
+                                    !components[1]->identifiers().empty()) {
+                                    const auto &idH =
+                                        components[0]->identifiers().front();
+                                    const auto &idV =
+                                        components[1]->identifiers().front();
+                                    if (*idH->codeSpace() ==
+                                        *idV->codeSpace()) {
+                                        std::cout << *idH->codeSpace() << ":"
+                                                  << idH->code() << '+'
+                                                  << idV->code() << ": "
+                                                  << pair.second << " %"
+                                                  << std::endl;
+                                        continue;
+                                    }
                                 }
                             }
+
+                            std::cout << "un-identified CRS: " << pair.second
+                                      << " %" << std::endl;
                         }
                     } catch (const std::exception &e) {
                         std::cerr << "Identification failed: " << e.what()
@@ -1293,12 +1347,12 @@ int main(int argc, char **argv) {
         }
 
         try {
-            outputOperations(dbContext, sourceCRSStr, targetCRSStr, bboxFilter,
-                             spatialCriterion,
-                             spatialCriterionExplicitlySpecified, crsExtentUse,
-                             gridAvailabilityUse, allowUseIntermediateCRS,
-                             pivots, authority, usePROJGridAlternatives,
-                             showSuperseded, promoteTo3D, outputOpt, summary);
+            outputOperations(
+                dbContext, sourceCRSStr, targetCRSStr, bboxFilter,
+                spatialCriterion, spatialCriterionExplicitlySpecified,
+                crsExtentUse, gridAvailabilityUse, allowUseIntermediateCRS,
+                pivots, authority, usePROJGridAlternatives, showSuperseded,
+                promoteTo3D, minimumAccuracy, outputOpt, summary);
         } catch (const std::exception &e) {
             std::cerr << "outputOperations() failed with: " << e.what()
                       << std::endl;
